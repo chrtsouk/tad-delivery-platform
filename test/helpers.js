@@ -16,7 +16,7 @@ export const POSTCODES = {
 
 /** Everything in memory (SQLite ':memory:'), fake Fleetbase / VROOM / OSRM / postcodes, a clock you can move. No files, no temp dirs. */
 export function makeCtx({ vroomFail = false, osrmFail = false, settings = {}, env = {} } = {}) {
-  const config = loadConfig({ TRACK_SECRET: 'test-secret', PUBLIC_URL: 'http://track.test', ...env });
+  const config = loadConfig({ TRACK_SECRET: 'test-secret', SESSION_SECRET: 'sess', ADMIN_PASSWORD: 'pw-test', ADMIN_API_TOKEN: 'admin-token', OWN_SITE_API_KEY: 'site-key', PUBLIC_URL: 'http://track.test', HUBRISE_CLIENT_SECRET: 'hr-secret', HUB_WEBHOOK_SECRET: 'hub-secret', ...env });
   const fb = fakeFleetbase();
   const now = fakeClock();
   const emails = [];
@@ -47,3 +47,24 @@ export async function clockIn(ctx, id, { lat = 51.465, lng = -0.17 } = {}) {
   if (!ctx.fb.drivers_.has(id)) ctx.fb.addDriver({ id, name: id, online: false, lat, lng });
   return ctx.shifts.clockIn(id);
 }
+
+import { createApp } from '../server/app.js';
+import crypto from 'node:crypto';
+
+/** Start the real Express app on a free port with the in-memory context. */
+export async function startApp(ctx) {
+  const app = createApp(ctx, { webDir: '/nonexistent', uploadDir: '.tmp-test/uploads' });
+  const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const call = async (method, path, { body, headers = {}, raw, cookie } = {}) => {
+    const res = await fetch(url + path, {
+      method, headers: { ...(body !== undefined && !raw ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}), ...headers },
+      body: raw ?? (body !== undefined ? JSON.stringify(body) : undefined),
+    });
+    const text = await res.text();
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    return { status: res.status, data, headers: res.headers };
+  };
+  return { url, call, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) };
+}
+export const hmacHex = (secret, body) => crypto.createHmac('sha256', secret).update(body).digest('hex');
