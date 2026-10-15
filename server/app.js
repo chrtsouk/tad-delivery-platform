@@ -81,7 +81,13 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   admin.use(auth.requireAdmin);
 
   admin.get('/settings', (req, res) => res.json(settings.all()));
-  admin.put('/settings', (req, res) => { const s = settings.set(req.body || {}); audit.log('admin', 'settings.update', 'settings', null, req.body); bus.emit('board', { settings: true }); res.json(s); });
+  admin.put('/settings', (req, res) => {
+    const s = settings.set(req.body || {});
+    audit.log('admin', 'settings.update', 'settings', null, req.body);
+    bus.emit('board', { settings: true });
+    if ('radius_km' in (req.body || {}) || 'store' in (req.body || {})) ctx.fleetbaseConfig.syncServiceArea().catch((e) => logger.warn?.(`service area sync: ${e.message}`));
+    res.json(s);
+  });
 
   admin.get('/board', async (req, res) => res.json(await board()));
   admin.get('/stream', (req, res) => {

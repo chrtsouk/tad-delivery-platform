@@ -3,7 +3,7 @@ import { nnSequence } from '../../lib/route.js';
 
 /** In-memory stand-in for the Fleetbase API client (same method names as lib/clients.js createFleetbase). */
 export function fakeFleetbase() {
-  const f = { drivers_: new Map(), orders_: new Map(), places_: new Map(), calls: [], failOn: new Set(), n: 0 };
+  const f = { drivers_: new Map(), orders_: new Map(), places_: new Map(), areas_: new Map(), calls: [], failOn: new Set(), n: 0 };
   const id = (p) => `${p}_${++f.n}`;
   const rec = (name, ...a) => { f.calls.push([name, ...a]); if (f.failOn.has(name)) throw new Error(`fake ${name} failure`); };
   Object.assign(f, {
@@ -21,8 +21,9 @@ export function fakeFleetbase() {
     async cancel(i) { rec('cancel', i); return {}; },
     async activity() { return {}; },
     async eta() { return {}; },
-    async serviceAreas() { return []; },
-    async createServiceArea(a) { rec('createServiceArea', a); return { id: id('sa'), ...a }; },
+    async serviceAreas() { return [...f.areas_.values()]; },
+    async createServiceArea(a) { rec('createServiceArea', a); const x = { id: id('sa'), ...a }; f.areas_.set(x.id, x); return x; },
+    async updateServiceArea(i, a) { rec('updateServiceArea', i, a); Object.assign(f.areas_.get(i), a); return f.areas_.get(i); },
   });
   return f;
 }

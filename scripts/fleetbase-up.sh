@@ -18,4 +18,5 @@ if ! docker compose exec -T application php artisan migrate:status >/dev/null 2>
   touch .deployed
 fi
 docker compose up -d
+docker compose exec -T application php artisan storage:link >/dev/null 2>&1 || true   # uploaded files (logo, proof of delivery) are served from public/storage
 echo "Fleetbase API  http://localhost:8000   Console http://localhost:4200"
