@@ -342,3 +342,16 @@ test('public quote and status for the owner\'s own ordering site', async () => {
     void crypto;
   } finally { await close(); }
 });
+
+test('postcode lookup for the settings page (shop location) and SPA/unknown API routes', async () => {
+  const { call, close } = await setup();
+  try {
+    const r = await call('GET', '/api/geo/postcode?postcode=sw12%208aa', { headers: ADMIN });
+    assert.equal(r.data.postcode, 'SW12 8AA');
+    assert.ok(r.data.lat);
+    assert.equal((await call('GET', '/api/geo/postcode?postcode=zz99%209zz', { headers: ADMIN })).status, 404);
+    assert.equal((await call('GET', '/api/geo/postcode?postcode=nonsense', { headers: ADMIN })).status, 400);
+    assert.equal((await call('GET', '/api/nope', { headers: ADMIN })).status, 404);
+    assert.equal((await call('GET', '/api/geo/postcode?postcode=E1%206AN')).status, 401);
+  } finally { await close(); }
+});

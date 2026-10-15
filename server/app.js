@@ -7,6 +7,7 @@ import { createAuth } from './auth.js';
 import { parseQr } from '../services/labels.js';
 import { safeEqual } from '../lib/tokens.js';
 import { localDate } from '../lib/tz.js';
+import { normalisePostcode } from '../lib/geo.js';
 
 const json = express.json({ limit: '4mb' });
 const raw = express.raw({ type: '*/*', limit: '2mb' });
@@ -131,6 +132,12 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   admin.post('/orders/:id/requeue', (req, res) => { const o = orders.transition(intParam(req.params.id), 'ready', { actor: 'admin' }); batcher.tick().catch(() => {}); res.json({ order: o }); });
   admin.post('/orders/:id/remove', (req, res) => res.json({ order: orders.transition(intParam(req.params.id), 'removed', { actor: 'admin', reason: req.body?.reason || 'Removed by admin' }) }));
 
+  admin.get('/geo/postcode', async (req, res) => {
+    const pc = normalisePostcode(req.query.postcode);
+    const hit = await ctx.postcodes.lookup(pc.postcode);
+    if (!hit) fail(`We could not find ${pc.postcode} on the map`, 404, 'unknown_postcode');
+    res.json({ postcode: pc.postcode, lat: hit.lat, lng: hit.lng, district: hit.admin_district });
+  });
   admin.get('/address/search', async (req, res) => res.json({ results: await ingest.searchAddress({ phone: req.query.phone, query: req.query.q, near: ctx.settings.get('store') }) }));
 
   admin.post('/batcher/tick', async (req, res) => res.json(await batcher.tick()));

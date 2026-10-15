@@ -207,7 +207,12 @@ export default function Settings() {
           <div className="set-field"><label htmlFor="s-name">Shop name</label><input id="s-name" value={form.store_name} onChange={(e) => set({ store_name: e.target.value })} /></div>
           <div className="set-field"><label htmlFor="s-phone">Shop phone</label><input id="s-phone" type="tel" value={form.store_phone} onChange={(e) => set({ store_phone: e.target.value })} /></div>
           <div className="set-field"><label htmlFor="s-addr">Address</label><input id="s-addr" value={form.store_address} onChange={(e) => set({ store_address: e.target.value })} /></div>
-          <div className="set-field"><label htmlFor="s-pc">Postcode</label><input id="s-pc" value={form.store_postcode} onChange={(e) => set({ store_postcode: e.target.value.toUpperCase() })} /></div>
+          <div className="set-field"><label htmlFor="s-pc">Postcode</label>
+            <div className="row" style={{ flexWrap: 'nowrap' }}>
+              <input id="s-pc" value={form.store_postcode} onChange={(e) => set({ store_postcode: e.target.value.toUpperCase() })} />
+              <button type="button" onClick={async () => { try { const r = await get(`/api/geo/postcode?postcode=${encodeURIComponent(form.store_postcode)}`); set({ store_postcode: r.postcode, store_lat: String(r.lat), store_lng: String(r.lng) }); } catch (e) { window.alert(e.message); } }}>Find on map</button>
+            </div>
+          </div>
           <Num id="s-lat" label="Latitude" value={form.store_lat} onChange={(v) => set({ store_lat: v })} min={-90} step="any" help="Used for distances and the map." />
           <Num id="s-lng" label="Longitude" value={form.store_lng} onChange={(v) => set({ store_lng: v })} min={-180} step="any" />
         </div>
