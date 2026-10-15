@@ -97,11 +97,19 @@ export function createIngest(ctx) {
   function hubriseAuthorizeUrl(redirectUri) {
     const { clientId } = config.hubrise;
     if (!clientId) throw new AppError('HubRise is not configured (HUBRISE_CLIENT_ID / HUBRISE_CLIENT_SECRET)', 503, 'not_configured');
-    const p = new URLSearchParams({ redirect_uri: redirectUri, client_id: clientId, scope: 'location[orders.read_write]', state: crypto.randomBytes(8).toString('hex') });
+    // the callback comes back from another site, so a SameSite=Strict login cookie is not sent: the one-time `state` is the proof instead
+    const state = crypto.randomBytes(16).toString('hex');
+    q.run(db, "INSERT INTO integrations(name,data,updated_at) VALUES('hubrise_state',?,?) ON CONFLICT(name) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at", JSON.stringify({ state, at: now().getTime() }), iso());
+    const p = new URLSearchParams({ redirect_uri: redirectUri, client_id: clientId, scope: 'location[orders.read_write]', state });
     return `https://manager.hubrise.com/oauth2/v1/authorize?${p}`;
   }
 
-  async function hubriseExchange(code, redirectUri) {
+  async function hubriseExchange(code, redirectUri, state) {
+    const row = q.get(db, "SELECT data FROM integrations WHERE name = 'hubrise_state'");
+    const saved = row ? JSON.parse(row.data) : null;
+    q.run(db, "DELETE FROM integrations WHERE name = 'hubrise_state'");      // single use
+    if (!saved || !state || !safeEqual(saved.state, String(state)) || now().getTime() - saved.at > 10 * 60000) throw new AppError('This HubRise connection link has expired. Start again from Settings.', 400, 'bad_state');
+    if (!code) throw new AppError('HubRise did not send a code', 400, 'bad_request');
     const { clientId, clientSecret, apiUrl } = config.hubrise;
     const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
     const tok = await fetchJson('https://manager.hubrise.com/oauth2/v1/token', {
@@ -130,7 +138,31 @@ export function createIngest(ctx) {
     if (ev.resource_type !== 'order') return { ignored: true };
     const eventId = `hubrise:${ev.id}`;
     if (q.get(db, 'SELECT 1 AS x FROM webhook_seen WHERE id = ?', eventId)) return { duplicate: true };
-    q.run(db, 'INSERT INTO webhook_seen(id,at) VALUES(?,?)', eventId, iso());
+    try {
+      const r = await processHubRiseEvent(ev);
+      q.run(db, 'INSERT OR IGNORE INTO webhook_seen(id,at) VALUES(?,?)', eventId, iso());     // only a processed event is "seen": a failed one must stay retryable
+      return r;
+    } catch (e) {
+      q.run(db, 'INSERT INTO ingest_failures(source, external_id, error, payload, at) VALUES(?,?,?,?,?)', 'hubrise', String(ev.order_id || ev.new_state?.id || ''), e.message, JSON.stringify(ev), iso());
+      audit.log('system', 'ingest.failed', 'order', ev.order_id || null, { source: 'hubrise', error: e.message });
+      ctx.bus.emit('board', { ingestFailed: true });
+      throw e;
+    }
+  }
+
+  const failures = () => q.all(db, 'SELECT id, source, external_id, error, at FROM ingest_failures WHERE resolved_at IS NULL ORDER BY id');
+  async function retryFailure(id) {
+    const f = q.get(db, 'SELECT * FROM ingest_failures WHERE id = ? AND resolved_at IS NULL', id);
+    if (!f) throw new AppError('That failed order is not waiting any more', 404, 'not_found');
+    const r = await processHubRiseEvent(JSON.parse(f.payload));      // throws again if it still cannot be created: the row stays
+    q.run(db, 'UPDATE ingest_failures SET resolved_at = ? WHERE id = ?', iso(), id);
+    q.run(db, 'INSERT OR IGNORE INTO webhook_seen(id,at) VALUES(?,?)', `hubrise:${JSON.parse(f.payload).id}`, iso());
+    audit.log('admin', 'ingest.retried', 'order', f.external_id, r);
+    return r;
+  }
+  function dismissFailure(id) { q.run(db, 'UPDATE ingest_failures SET resolved_at = ? WHERE id = ?', iso(), id); audit.log('admin', 'ingest.dismissed', 'ingest_failure', id); }
+
+  async function processHubRiseEvent(ev) {
     const orderId = ev.order_id || ev.new_state?.id;
     let full = ev.new_state;
     const tok = hr();
@@ -205,5 +237,5 @@ export function createIngest(ctx) {
     return orders.create({ ...body, source: 'manual', external_id: body.external_id ?? null }, { actor });
   }
 
-  return { ownSiteAuth, fromOwnSite, hubriseAuthorizeUrl, hubriseExchange, verifyHubRise, handleHubRiseEvent, verifyPlatform, handlePlatformEvent, searchAddress, manual, hubriseConnected: () => Boolean(hr()) };
+  return { failures, retryFailure, dismissFailure, ownSiteAuth, fromOwnSite, hubriseAuthorizeUrl, hubriseExchange, verifyHubRise, handleHubRiseEvent, verifyPlatform, handlePlatformEvent, searchAddress, manual, hubriseConnected: () => Boolean(hr()) };
 }

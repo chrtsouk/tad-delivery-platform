@@ -324,7 +324,12 @@ test('GDPR erase blanks the person but keeps the order record', async () => {
     const o = ctx.orders.byId(r.data.order.id);
     assert.equal(o.customer_phone, null);
     assert.equal(o.customer_name, null);
-    assert.equal(o.postcode, 'SW11 5XX');
+    assert.equal(o.postcode, null);
+    assert.equal(o.outcode, 'SW11', 'the district is not personal and stays');
+    assert.equal(o.lat, null);
+    assert.equal(o.track_token, null);
+    assert.equal(o.address_line, '(erased)');
+    assert.equal((await call('GET', `/api/track/${encodeURIComponent(r.data.order.track_token)}`)).status, 404, 'the tracking link stops working');
     assert.equal((await call('GET', '/api/address/search?phone=07700900222', { headers: ADMIN })).data.results.length, 0);
   } finally { await close(); }
 });

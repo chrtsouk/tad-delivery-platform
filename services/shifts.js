@@ -24,7 +24,9 @@ export function createShifts(ctx) {
     ctx.sites.need(siteId);
     if (open(driverId)) throw new AppError('You are already clocked in', 409, 'already_in');
     const d = await fbDriver(driverId);
-    q.run(db, 'INSERT INTO driver_shifts(driver_id, driver_name, clock_in_at, zone, site_id) VALUES(?,?,?,?,?)', driverId, d.name ?? null, iso(), zone, siteId);
+    if (open(driverId)) throw new AppError('You are already clocked in', 409, 'already_in');   // re-check: a double tap may have won while we waited for Fleetbase
+    try { q.run(db, 'INSERT INTO driver_shifts(driver_id, driver_name, clock_in_at, zone, site_id) VALUES(?,?,?,?,?)', driverId, d.name ?? null, iso(), zone, siteId); }
+    catch (e) { if (/UNIQUE/i.test(e.message)) throw new AppError('You are already clocked in', 409, 'already_in'); throw e; }
     await ensureOnline(driverId, true);
     audit.log(actor, 'shift.clock_in', 'driver', driverId, { zone });
     ctx.bus.emit('shift', { driverId, clockedIn: true });
@@ -36,10 +38,10 @@ export function createShifts(ctx) {
     if (!s) throw new AppError('You are not clocked in', 409, 'not_in');
     const onRun = q.get(db, "SELECT id FROM batches WHERE driver_id = ? AND status = 'out'", driverId);
     if (onRun) throw new AppError('Finish your current run before you clock out', 409, 'on_a_run');
-    q.run(db, 'UPDATE driver_shifts SET clock_out_at = ? WHERE id = ?', iso(), s.id);
+    q.run(db, 'UPDATE driver_shifts SET clock_out_at = ? WHERE driver_id = ? AND clock_out_at IS NULL', iso(), driverId);
     // anything lined up for this driver (not yet out) goes back to the queue
     const { requeueDriver } = ctx.hooks ?? {};
-    if (requeueDriver) requeueDriver(driverId);
+    if (requeueDriver) await requeueDriver(driverId);
     await ensureOnline(driverId, false);
     audit.log(actor, 'shift.clock_out', 'driver', driverId);
     ctx.bus.emit('shift', { driverId, clockedIn: false });

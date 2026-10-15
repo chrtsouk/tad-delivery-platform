@@ -14,8 +14,14 @@ export function createHubSync(ctx) {
   const { db, now, config, hub, orders, audit, logger = console } = ctx;
   const iso = () => now().toISOString();
 
-  async function pushOrder(order) {
-    if (!hub.enabled() || order.hub_order_id || order.source === 'hub') return null;
+  const pushing = new Map();
+  function pushOrder(order) {
+    // the order-created event and the retry loop must never both post the same order (duplicate kitchen tickets)
+    if (!hub.enabled() || order.hub_order_id || order.source === 'hub') return Promise.resolve(null);
+    if (!pushing.has(order.id)) pushing.set(order.id, doPush(order).finally(() => pushing.delete(order.id)));
+    return pushing.get(order.id);
+  }
+  async function doPush(order) {
     const res = await hub.postOrder({
       source: 'tad-delivery', external_ref: order.number, channel: order.source, customer: order.customer_name, note: [order.fulfilment === 'collection' ? 'COLLECTION' : 'DELIVERY', order.notes].filter(Boolean).join(' — '),
       lines: order.items.map((i) => ({ name: i.name, qty: i.qty })),
@@ -72,10 +78,17 @@ export function createHubSync(ctx) {
   function erasePerson({ phone }) {
     const p = normalisePhone(phone);
     if (!p) throw new AppError('A phone number is needed to find the person');
-    const r = q.run(db, "UPDATE orders SET customer_name = NULL, customer_phone = NULL, customer_email = NULL, address_line = '(erased)', notes = NULL WHERE customer_phone = ?", p);
+    const rows = q.all(db, 'SELECT id, fb_dropoff_place, fb_customer FROM orders WHERE customer_phone = ?', p);
+    // the person, the address, the coordinates and the live tracking link go; the order record (times, district, items) stays
+    const r = q.run(db, "UPDATE orders SET customer_name = NULL, customer_phone = NULL, customer_email = NULL, address_line = '(erased)', postcode = NULL, lat = NULL, lng = NULL, notes = NULL, track_token = NULL, fb_dropoff_place = NULL, fb_customer = NULL WHERE customer_phone = ?", p);
     const a = q.run(db, 'DELETE FROM customer_addresses WHERE phone_norm = ?', p);
-    audit.log('system', 'privacy.erase', 'customer', p.slice(-4), { orders: r.changes, addresses: a.changes });
-    return { orders: Number(r.changes), addresses: Number(a.changes) };
+    // Fleetbase's own copies (place + contact), best effort
+    for (const o of rows) {
+      if (o.fb_dropoff_place) Promise.resolve().then(() => ctx.fleetbase.deletePlace(o.fb_dropoff_place)).catch((e) => logger.warn?.(`Fleetbase place erase: ${e.message}`));
+      if (o.fb_customer) Promise.resolve().then(() => ctx.fleetbase.deleteContact(o.fb_customer)).catch((e) => logger.warn?.(`Fleetbase contact erase: ${e.message}`));
+    }
+    audit.log('system', 'privacy.erase', 'customer', p.slice(-4), { orders: r.changes, addresses: a.changes, note: 'the hub keeps its own copy: erase it there too' });
+    return { orders: Number(r.changes), addresses: Number(a.changes), fleetbase_copies_requested: rows.filter((o) => o.fb_dropoff_place || o.fb_customer).length };
   }
 
   return { pushOrder, pushPending, pollEvents, applyEvent, verifyWebhook, erasePerson };

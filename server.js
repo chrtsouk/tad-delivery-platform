@@ -25,5 +25,5 @@ const timer = setInterval(async () => {
   } catch (e) { console.warn('tick:', e.message); } finally { busy = false; }
 }, config.tickMs);
 
-const stop = () => { clearInterval(timer); server.close(() => { ctx.db.close(); process.exit(0); }); };
+const stop = () => { clearInterval(timer); server.close(() => { ctx.db.close(); process.exit(0); }); server.closeAllConnections?.(); setTimeout(() => process.exit(0), 3000).unref(); };
 process.on('SIGINT', stop); process.on('SIGTERM', stop);

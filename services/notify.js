@@ -8,6 +8,7 @@
 import nodemailer from 'nodemailer';
 import webpush from 'web-push';
 import { q } from '../lib/db.js';
+import { AppError } from '../lib/util.js';
 
 const CUSTOMER_COPY = {
   accepted: (o, url) => ({ title: 'We have your order', body: `Order ${o.number} is accepted and being made. Follow it live: ${url}` }),
@@ -63,7 +64,16 @@ export function createNotify({ db, now, config, bus, transport = null, push = we
     return results;
   }
 
-  const subscribe = (kind, ref, sub) => q.run(db, 'INSERT INTO push_subscriptions(kind,ref,endpoint,sub_json,created_at) VALUES(?,?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET kind=excluded.kind, ref=excluded.ref, sub_json=excluded.sub_json', kind, ref, sub.endpoint, JSON.stringify(sub), iso());
+  // Only real browser push services are accepted (a customer could otherwise point us at any host: blind SSRF), few per order, never re-pointed.
+  const PUSH_HOSTS = /(^|\.)(googleapis\.com|push\.services\.mozilla\.com|notify\.windows\.com|push\.apple\.com|push\.mozilla\.org)$/i;
+  function subscribe(kind, ref, sub) {
+    let u; try { u = new URL(sub?.endpoint); } catch { throw new AppError('That is not a valid push subscription'); }
+    if (u.protocol !== 'https:' || !PUSH_HOSTS.test(u.hostname) || JSON.stringify(sub).length > 4000) throw new AppError('That push service is not supported');
+    const other = q.get(db, 'SELECT kind, ref FROM push_subscriptions WHERE endpoint = ?', sub.endpoint);
+    if (other && (other.kind !== kind || other.ref !== ref)) throw new AppError('That subscription already belongs to something else', 409, 'conflict');
+    if (!other && q.get(db, 'SELECT COUNT(*) AS n FROM push_subscriptions WHERE kind = ? AND ref = ?', kind, ref).n >= 5) throw new AppError('Too many devices are subscribed to this', 429, 'too_many');
+    q.run(db, 'INSERT INTO push_subscriptions(kind,ref,endpoint,sub_json,created_at) VALUES(?,?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET sub_json=excluded.sub_json', kind, ref, sub.endpoint, JSON.stringify(sub), iso());
+  }
 
   const inbox = (target, { unreadOnly = true } = {}) =>
     q.all(db, `SELECT id, kind, payload, created_at, read_at FROM notifications WHERE target = ? AND channel = 'inbox' ${unreadOnly ? 'AND read_at IS NULL' : ''} ORDER BY id DESC LIMIT 50`, target).map((r) => ({ ...r, payload: JSON.parse(r.payload) }));

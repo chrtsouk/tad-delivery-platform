@@ -20,7 +20,7 @@ export function createTracking(ctx) {
   function orderForToken(token) {
     const number = verify(ctx.trackSecret, decodeURIComponent(token));
     const o = number && orders.byNumber(number);
-    if (!o) throw new AppError('We could not find that order', 404, 'not_found');
+    if (!o || o.address_line === '(erased)' || !o.track_token) throw new AppError('We could not find that order', 404, 'not_found');
     return o;
   }
 

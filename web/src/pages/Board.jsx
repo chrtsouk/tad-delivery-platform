@@ -10,6 +10,7 @@ import Icon from '../components/Icon.jsx';
 import { useToasts } from '../components/Toasts.jsx';
 import OrderCard from '../board/OrderCard.jsx';
 import TimelineModal from '../board/TimelineModal.jsx';
+import IngestFailures from '../board/IngestFailures.jsx';
 import { useLateOrders, useSecond } from '../board/clock.js';
 import { clock, printProblem, shortNo, stateLabel } from '../board/format.js';
 import '../components/ui.css';
@@ -263,6 +264,7 @@ export default function Board() {
 
       {error && <div className="err" role="alert">Connection problem: {error.message}. Showing the last data received.</div>}
       <LateBanner board={board} snapAt={snapAt} onPick={(id) => select(id, true)} />
+      <IngestFailures count={board.ingest_failures} onChanged={refresh} />
 
       {/* drivers strip */}
       <div className="brd-drivers" aria-label="Drivers">

@@ -15,7 +15,7 @@ export const POSTCODES = {
 };
 
 /** Everything in memory (SQLite ':memory:'), fake Fleetbase / VROOM / OSRM / postcodes, a clock you can move. No files, no temp dirs. */
-export function makeCtx({ vroomFail = false, osrmFail = false, settings = {}, env = {} } = {}) {
+export function makeCtx({ vroomFail = false, vroomDelayMs = 0, osrmFail = false, settings = {}, env = {} } = {}) {
   const config = loadConfig({ TRACK_SECRET: 'test-secret', SESSION_SECRET: 'sess', ADMIN_PASSWORD: 'pw-test', ADMIN_API_TOKEN: 'admin-token', OWN_SITE_API_KEY: 'site-key', PUBLIC_URL: 'http://track.test', HUBRISE_CLIENT_SECRET: 'hr-secret', HUB_WEBHOOK_SECRET: 'hub-secret', ...env });
   const fb = fakeFleetbase();
   const now = fakeClock();
@@ -23,7 +23,7 @@ export function makeCtx({ vroomFail = false, osrmFail = false, settings = {}, en
   const pushes = [];
   const ctx = buildContext({
     config: { ...config, dbPath: ':memory:' }, now, logger: silent,
-    clients: { fleetbase: fb, postcodes: fakePostcodes(POSTCODES), vroom: fakeVroom({ fail: vroomFail }), osrm: fakeOsrm({ fail: osrmFail }), hub: { enabled: () => false } },
+    clients: { fleetbase: fb, postcodes: fakePostcodes(POSTCODES), vroom: fakeVroom({ fail: vroomFail, delayMs: vroomDelayMs }), osrm: fakeOsrm({ fail: osrmFail }), hub: { enabled: () => false } },
     transport: { sendMail: async (m) => { emails.push(m); } },
   });
   ctx.settings.set({ open: true, ...settings });

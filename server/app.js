@@ -192,11 +192,14 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   });
 
   admin.post('/privacy/erase', (req, res) => res.json(hubsync.erasePerson({ phone: req.body?.phone })));
+  admin.get('/ingest/failures', (req, res) => res.json({ failures: ingest.failures() }));
+  admin.post('/ingest/failures/:id/retry', async (req, res) => res.json(await ingest.retryFailure(intParam(req.params.id))));
+  admin.post('/ingest/failures/:id/dismiss', (req, res) => { ingest.dismissFailure(intParam(req.params.id)); res.json({ ok: true }); });
   admin.get('/integrations', (req, res) => res.json({ hubrise: { configured: Boolean(ctx.config.hubrise.clientId), connected: ingest.hubriseConnected() }, hub: { enabled: ctx.hub.enabled() }, printer: Boolean(ctx.config.printer.host), email: Boolean(ctx.config.smtp.host), push: Boolean(notify.vapidPublicKey),
     platforms: Object.fromEntries(Object.entries(ctx.config.platforms).map(([k, v]) => [k, v.enabled])) }));
   admin.get('/hubrise/connect', (req, res) => res.json({ url: ingest.hubriseAuthorizeUrl(`${ctx.config.publicUrl}/api/hubrise/oauth/callback`) }));
-  app.get('/api/hubrise/oauth/callback', auth.requireAdmin, async (req, res) => {
-    const r = await ingest.hubriseExchange(String(req.query.code || ''), `${ctx.config.publicUrl}/api/hubrise/oauth/callback`);
+  app.get('/api/hubrise/oauth/callback', async (req, res) => {
+    const r = await ingest.hubriseExchange(String(req.query.code || ''), `${ctx.config.publicUrl}/api/hubrise/oauth/callback`, String(req.query.state || ''));
     res.type('html').send(`<p>HubRise connected to ${String(r.location_name).replace(/[<>&]/g, '')}. You can close this tab.</p>`);
   });
   app.use('/api', admin);
@@ -278,7 +281,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const batches = q.all(ctx.db, "SELECT * FROM batches WHERE status IN ('assigned','planned','out') ORDER BY id").map((b) => ({ ...b, route_json: undefined, order_ids: q.all(ctx.db, 'SELECT id FROM orders WHERE batch_id = ? ORDER BY stop_seq', b.id).map((r) => r.id) }));
     const { proposals, engine } = await batcher.plan().catch(() => ({ proposals: [], engine: 'none' }));
     return {
-      now: now().toISOString(), settings: s, orders: open.map(withSla(s)), recent: recent.map(withSla(s)), drivers: av, batches, engine,
+      now: now().toISOString(), ingest_failures: ingest.failures().length, settings: s, orders: open.map(withSla(s)), recent: recent.map(withSla(s)), drivers: av, batches, engine,
       preview: proposals.map((p) => ({ order_ids: p.orders.map((o) => o.id), ripe: p.ripe, full: p.full, waits_seconds: p.waits_seconds })),
     };
   }

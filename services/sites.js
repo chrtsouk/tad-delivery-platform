@@ -14,7 +14,8 @@ export function createSites(ctx) {
   }
   const get = (id = 'main') => list().find((s) => s.id === id) ?? null;
   const need = (id = 'main') => { const s = get(id); if (!s || !s.active) throw new AppError(`There is no active shop called "${id}"`, 404, 'unknown_site'); return s; };
-  const store = (id) => { const s = need(id); return { name: s.name, lat: s.lat, lng: s.lng, postcode: s.postcode, address: s.address, phone: s.phone }; };
+  // existing orders and runs keep working even if their shop was switched off; only NEW orders need an active shop
+  const store = (id) => { const s = get(id); if (!s) throw new AppError(`There is no shop called "${id}"`, 404, 'unknown_site'); return { name: s.name, lat: s.lat, lng: s.lng, postcode: s.postcode, address: s.address, phone: s.phone }; };
 
   async function create({ id, name, postcode, address, phone, lat, lng }) {
     const sid = String(id || name || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');

@@ -18,6 +18,8 @@ export function fakeFleetbase() {
     async dispatch(i) { rec('dispatch', i); f.orders_.get(i).status = 'dispatched'; return {}; },
     async start(i) { rec('start', i); f.orders_.get(i).status = 'started'; return {}; },
     async complete(i) { rec('complete', i); f.orders_.get(i).status = 'completed'; return {}; },
+    async deletePlace(i) { rec('deletePlace', i); f.places_.delete(i); return {}; },
+    async deleteContact(i) { rec('deleteContact', i); return {}; },
     async cancel(i) { rec('cancel', i); return {}; },
     async activity() { return {}; },
     async eta() { return {}; },
@@ -37,12 +39,13 @@ export function fakePostcodes(table = {}) {
 }
 
 /** VROOM stand-in: greedy nearest-neighbour split into vehicles' capacity, with arrival times from straight-line speed (30 km/h). */
-export function fakeVroom({ fail = false } = {}) {
+export function fakeVroom({ fail = false, delayMs = 0 } = {}) {
   const calls = [];
   return {
     calls,
     async solve({ vehicles, jobs }) {
       calls.push({ vehicles, jobs });
+      if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
       if (fail) throw new Error('VROOM down');
       const cap = vehicles[0].capacity, start = vehicles[0].start;
       const left = jobs.map((j) => ({ ...j, ...j.loc }));

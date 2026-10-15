@@ -38,11 +38,21 @@ const fb = await ctx.fleetbase.order(ctx.orders.byId(a.id).fleetbase_order_id);
 assert.equal(fb.status, 'dispatched');
 step('Fleetbase order is dispatched');
 
-await ctx.batcher.markOut(ctx.orders.byId(a.id).batch_id);
+// the driver app (Navigator) works on Fleetbase directly: simulate it starting the order there, and check we notice
+await ctx.fleetbase.start(ctx.orders.byId(a.id).fleetbase_order_id);
+console.log('Fleetbase status after Navigator-style start:', (await ctx.fleetbase.order(ctx.orders.byId(a.id).fleetbase_order_id)).status);
+const rec = await ctx.fbsync.reconcile();
+assert.equal(ctx.orders.byId(a.id).state, 'out', 'reconcile sent the run out');
+assert.equal(ctx.orders.byId(b.id).state, 'out');
+step(`reconcile noticed the start in Fleetbase (${JSON.stringify(rec)})`);
+await ctx.fleetbase.complete(ctx.orders.byId(a.id).fleetbase_order_id);
+await ctx.fbsync.reconcile();
+assert.equal(ctx.orders.byId(a.id).state, 'delivered', 'reconcile delivered it');
+step('reconcile noticed the completion in Fleetbase');
 const eta = await ctx.osrm.route(hit, { lat: 51.5014, lng: -0.1419 });
 assert.ok(eta.seconds > 0);
 step(`OSRM route ${Math.round(eta.seconds)}s`);
-for (const o of [a, b]) await ctx.batcher.deliver(o.id);
+await ctx.batcher.deliver(b.id);
 const done = await ctx.fleetbase.order(ctx.orders.byId(a.id).fleetbase_order_id);
 console.log('Fleetbase final status:', done.status);
 await ctx.shifts.clockOut(d.id);

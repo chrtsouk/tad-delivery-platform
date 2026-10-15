@@ -137,7 +137,14 @@ export function createOrders(ctx) {
   }
 
   /** Create the matching Fleetbase order (unmodified Fleetbase, via its API). Safe to call again: it only runs once. */
-  async function syncToFleetbase(order) {
+  const inflight = new Map();
+  function syncToFleetbase(order) {
+    // the creation-time sync and the tick's retry must never both create the order
+    if (!inflight.has(order.id)) inflight.set(order.id, doSync(order).finally(() => inflight.delete(order.id)));
+    return inflight.get(order.id);
+  }
+  async function doSync(order) {
+    order = byId(order.id);
     if (order.fulfilment !== 'delivery' || order.fleetbase_order_id || ['scheduled', 'cancelled', 'removed'].includes(order.state)) return order;
     const st = ctx.sites.store(order.site_id);
     const pickup = await fleetbase.createPlace({ name: st.name, street1: st.address || st.name, postal_code: st.postcode, country: 'GB', latitude: st.lat, longitude: st.lng });
@@ -147,7 +154,7 @@ export function createOrders(ctx) {
       customer: order.customer_name ? Object.fromEntries(Object.entries({ name: order.customer_name, phone: order.customer_phone, email: order.customer_email }).filter(([, v]) => v)) : undefined,
       notes: order.notes, meta: { tad_number: order.number, tad_id: order.id, source: order.source, items: order.items, postcode: order.postcode },
     });
-    q.run(db, 'UPDATE orders SET fleetbase_order_id = ?, fleetbase_tracking = ? WHERE id = ? AND fleetbase_order_id IS NULL', fb.id, fb.tracking_number?.tracking_number ?? null, order.id);
+    q.run(db, 'UPDATE orders SET fleetbase_order_id = ?, fleetbase_tracking = ?, fb_dropoff_place = ?, fb_customer = ? WHERE id = ? AND fleetbase_order_id IS NULL', fb.id, fb.tracking_number?.tracking_number ?? null, drop.id ?? null, fb.customer?.id ?? null, order.id);
     event(order.id, 'fleetbase_synced', { id: fb.id });
     return byId(order.id);
   }
@@ -159,7 +166,8 @@ export function createOrders(ctx) {
     if (to === 'failed' && !reason) throw new AppError('A reason is needed when a delivery fails');
     if (to === 'cancelled' && !reason) throw new AppError('A reason is needed to cancel an order');
     const sets = ['state = ?'], vals = [to];
-    if (TIME_COL[to]) { sets.push(`${TIME_COL[to]} = ?`); vals.push(iso()); }
+    if (to === 'ready') { sets.push('ready_at = COALESCE(ready_at, ?)', 'picked_at = NULL'); vals.push(iso()); }   // a requeued order keeps its place in the queue
+    else if (TIME_COL[to]) { sets.push(`${TIME_COL[to]} = ?`); vals.push(iso()); }
     if (to === 'ready' && o.state === 'failed') { sets.push('driver_id = NULL', 'batch_id = NULL', 'stop_seq = NULL', 'out_at = NULL', 'assigned_at = NULL'); }
     if (to === 'ready' && o.state === 'assigned') { sets.push('driver_id = NULL', 'batch_id = NULL', 'stop_seq = NULL', 'assigned_at = NULL'); }
     if (to === 'failed') { sets.push('fail_reason = ?', 'fail_photo = ?'); vals.push(reason, photo); }
@@ -167,6 +175,14 @@ export function createOrders(ctx) {
     q.run(db, `UPDATE orders SET ${sets.join(', ')} WHERE id = ?`, ...vals, id);
     event(id, `state:${to}`, { from: o.state, reason, ...(detail || {}) });
     audit.log(actor, `order.${to}`, 'order', id, { number: o.number, from: o.state, reason });
+    // an order that leaves a driver: retire its Fleetbase job (Navigator must stop showing it, a stale 'started' must never be reused),
+    // and settle the run it was on (a run left with no orders must not keep the driver busy)
+    const leaving = o.state === 'assigned' && to !== 'out';
+    if (o.fleetbase_order_id && (to === 'cancelled' || to === 'removed' || (to === 'ready' && ['assigned', 'failed'].includes(o.state)))) {
+      if (to === 'ready') q.run(db, 'UPDATE orders SET fleetbase_order_id = NULL, fleetbase_tracking = NULL WHERE id = ?', id);
+      Promise.resolve().then(() => fleetbase.cancel(o.fleetbase_order_id)).catch((e) => logger.warn?.(`Fleetbase cancel ${o.number}: ${e.message}`));
+    }
+    if (leaving && o.batch_id && ctx.hooks.settleBatch) Promise.resolve().then(() => ctx.hooks.settleBatch(o.batch_id)).catch((e) => logger.warn?.(`settle batch ${o.batch_id}: ${e.message}`));
     const order = byId(id);
     bus.emit('order', { order, from: o.state, to });
     return order;

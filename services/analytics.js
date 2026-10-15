@@ -83,7 +83,7 @@ export function createAnalytics(ctx) {
     };
   }
 
-  const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csvCell = (v) => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   /** Orders as CSV (no money columns beyond the order total the customer already paid online). */
   function ordersCsv({ from, to } = {}) {
     const r = range(from, to);
