@@ -11,6 +11,10 @@ The shop/dispatch side of Texas After Dark delivery (AGPL-3.0). It runs **unmodi
 | **Customer tracking** | `web/src/track`, `services/tracking.js` | Signed link, live driver marker, steps, queue position, OSRM ETA, call/message, web-push + email |
 | Labels | `services/labels.js` | Order number as text **and** in the QR (`TAD|<number>`); ESC/POS network printer; the driver app scans the bag |
 | Analytics | `services/analytics.js`, `web/src/pages/Analytics.jsx` | Demand heatmap (MapLibre), busy times, driver performance (no money), end-of-day, audit log |
+| **Route history** | `services/trails.js`, `web/src/components/TrailModal.jsx` | Every driver position is saved (app pings + server sampling) per run; replay any past route on the map from the Drivers page; retention set in Settings |
+| **Custom order fields** | `lib/customfields.js`, Settings | Owner-defined fields (text / number / choice / tick box, required?, show to driver?) on Add order, the order card and the driver app |
+| **Flags and blocks** | `services/flags.js`, `web/src/pages/Flags.jsx` | Flag or block a phone number or address: warns, refuses new orders (admin can override), listed in admin |
+| **Incidents** | `services/incidents.js`, `web/src/pages/Incidents.jsx` | Driver or admin logs an incident (type, note, photo) against an order/driver; list, resolve, CSV export, audit log |
 | Hub sync | `services/hubsync.js` | The management hub (`tad-management-app`) stays the source of truth |
 | Multi-site | `services/sites.js` | Several shops on one platform; each batches from its own location with its own drivers |
 

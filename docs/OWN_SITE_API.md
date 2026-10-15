@@ -20,3 +20,8 @@ POST /api/ingest/own
 ```
 
 Orders are **paid online before they are posted** (the platform has no cash handling). `422 outside_area` / `422 unknown_postcode` are customer-readable messages.
+
+## Custom fields and blocked customers
+
+* If the shop has added custom order fields (Settings → Custom order fields), send their answers as `"custom": { "<key>": value }` in the body. Keys are in `GET /api/settings → custom_fields` (admin) — a text, number, one of the listed choices, or `true`/`false` for a tick box. Unknown keys are ignored; required fields are **not** enforced for website orders.
+* A phone number or address the shop has **blocked** is refused with `409 { "code": "customer_blocked", "error": "This customer is blocked: <reason>" }`. Show your own polite message; do not show the reason to the customer. The website cannot override a block.

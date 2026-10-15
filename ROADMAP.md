@@ -15,6 +15,8 @@
 
 12. Photon GB index installed and checked live (address autocomplete); browser walkthrough of the board/add/scan/drivers/settings/analytics/calendar/audit pages on the live stack; independent code review done and all 15 findings fixed with regression tests (71 tests).
 
+13. **Pending additions (15 Oct 14:56), all built with tests:** saved driver GPS breadcrumb trails with replay and a retention setting; generic custom order fields (Settings, Add order, order card, driver app); flag / block problem customers and addresses (warn, refuse, admin override, list); incidents module (driver app + admin, photo, list, CSV, audit log). Platform 76 tests, driver app 83 jest tests; web UI driven in headless Chrome (`test-live/ui-walk-additions.mjs`); driver app jest tests added.
+
 ## Next (owner-only unless marked)
 1. Android build of TAD Drivers: needs Android SDK, signing keystore, Firebase `google-services.json`, Google Maps key, Transistorsoft licence (see `tad-drivers/docs/BUILD_ANDROID.md`), then a test on a real phone (the app has never run on a device).
 2. Production deploy (VPS): GB-wide OSRM graph (~16 GB RAM to extract), HTTPS in front of the platform, backups of `.data/tad.sqlite`, set `PUBLIC_URL`.
