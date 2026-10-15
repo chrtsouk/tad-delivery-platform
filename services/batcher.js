@@ -165,13 +165,19 @@ export function createBatcher(ctx) {
 
   /* ----------------------------------------------------------------- tick */
 
-  let ticking = false;
-  /** One pass of the brain. Safe to call as often as you like; overlapping calls are skipped. */
-  async function tick({ sendNow = false, only = null } = {}) {
-    if (ticking) return { skipped: true };
-    ticking = true;
+  let chain = Promise.resolve(), running = 0;
+  /** One pass of the brain. Calls are queued one after another (a "send now" click never gets lost); `skipIfBusy` is for the timer. */
+  function tick(opts = {}) {
+    if (opts.skipIfBusy && running) return Promise.resolve({ skipped: true });
+    running++;
+    const p = chain.then(() => runTick(opts)).finally(() => { running--; });
+    chain = p.catch(() => {});
+    return p;
+  }
+
+  async function runTick({ sendNow = false, only = null } = {}) {
     const out = { assigned: [], preassigned: [], waiting: [], queued: 0, activated: [], returnPushes: 0 };
-    try {
+    {
       orders.releaseScheduled();
       await orders.retryFleetbaseSync();
       out.activated = await activatePreassigned();
@@ -199,7 +205,7 @@ export function createBatcher(ctx) {
       }
       out.returnPushes = await pushReturns();
       return out;
-    } finally { ticking = false; }
+    }
   }
 
   const summarise = (p) => ({ orders: p.orders.map((o) => ({ id: o.id, number: o.number, postcode: o.postcode })), waits_seconds: p.waits_seconds, full: p.full });

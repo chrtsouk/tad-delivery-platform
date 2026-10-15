@@ -19,7 +19,7 @@ const timer = setInterval(async () => {
   busy = true;
   try {
     await ctx.fbsync.reconcile();
-    await ctx.batcher.tick();
+    await ctx.batcher.tick({ skipIfBusy: true });
     await ctx.hubsync.pushPending();
     await ctx.hubsync.pollEvents();
   } catch (e) { console.warn('tick:', e.message); } finally { busy = false; }

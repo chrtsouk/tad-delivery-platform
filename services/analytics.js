@@ -1,6 +1,7 @@
 /** Analytics: demand heatmap data, driver performance (no money), end-of-day report, audit log. Plain SQL over our order timestamps. */
 import Supercluster from 'supercluster';
 import { q } from '../lib/db.js';
+import { localParts, dayRangeUtc } from '../lib/tz.js';
 
 const mins = (a, b) => (a && b ? (Date.parse(b) - Date.parse(a)) / 60000 : null);
 const avg = (xs) => { const v = xs.filter((x) => x != null); return v.length ? Math.round((v.reduce((s, x) => s + x, 0) / v.length) * 10) / 10 : null; };
@@ -8,7 +9,13 @@ const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
 export function createAnalytics(ctx) {
   const { db, settings, audit } = ctx;
-  const range = (from, to) => ({ from: from ?? '0000', to: to ?? '9999' });
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  /** from/to may be ISO instants or plain dates; a plain date means that day's start in SHOP time. */
+  const range = (from, to) => {
+    const tz = settings.get('timezone');
+    const edge = (v, dflt) => (!v ? dflt : DAY.test(v) ? dayRangeUtc(v, tz)[0] : v);
+    return { from: edge(from, '0000'), to: edge(to, '9999') };
+  };
 
   /** Busy times and areas. `points` is GeoJSON-ready for MapLibre's heatmap layer; `clusters` uses supercluster by area. */
   function demand({ from, to, zoom = 11 } = {}) {
@@ -17,8 +24,8 @@ export function createAnalytics(ctx) {
     const hours = Array.from({ length: 7 }, () => Array(24).fill(0));
     const byOut = new Map();
     for (const o of rows) {
-      const d = new Date(o.created_at);
-      hours[(d.getUTCDay() + 6) % 7][d.getUTCHours()]++;
+      const lp = localParts(new Date(o.created_at), settings.get('timezone'));
+      hours[lp.dow][lp.h]++;
       byOut.set(o.outcode, (byOut.get(o.outcode) ?? 0) + 1);
     }
     const features = rows.map((o) => ({ type: 'Feature', properties: { weight: 1, outcode: o.outcode }, geometry: { type: 'Point', coordinates: [o.lng, o.lat] } }));
@@ -52,9 +59,9 @@ export function createAnalytics(ctx) {
     }).sort((a, b) => b.deliveries - a.deliveries);
   }
 
-  /** End of day for one calendar day (UTC date string YYYY-MM-DD). */
+  /** End of day for one shop-local calendar day (YYYY-MM-DD, in the `timezone` setting). */
   function endOfDay(day) {
-    const from = `${day}T00:00:00.000Z`, to = new Date(Date.parse(from) + 86400000).toISOString();
+    const [from, to] = dayRangeUtc(day, settings.get('timezone'));
     const orders = q.all(db, 'SELECT * FROM orders WHERE created_at >= ? AND created_at < ?', from, to);
     const late = settings.get('late_after_minutes');
     const count = (f) => orders.filter(f).length;

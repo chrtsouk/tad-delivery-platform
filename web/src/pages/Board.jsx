@@ -11,7 +11,7 @@ import { useToasts } from '../components/Toasts.jsx';
 import OrderCard from '../board/OrderCard.jsx';
 import TimelineModal from '../board/TimelineModal.jsx';
 import { useLateOrders, useSecond } from '../board/clock.js';
-import { clock, shortNo, stateLabel } from '../board/format.js';
+import { clock, printProblem, shortNo, stateLabel } from '../board/format.js';
 import '../components/ui.css';
 import '../board/board.css';
 
@@ -166,7 +166,10 @@ export default function Board() {
       case 'timeline': return setTimelineId(order.id);
       case 'label': {
         window.open(`/api/orders/${order.id}/label`, '_blank', 'noopener');
-        return call(key, () => post(`/api/orders/${order.id}/print`), `Label for ${order.number} sent to the printer`);
+        return withBusy(key, async () => {
+          try { await post(`/api/orders/${order.id}/print`); toast(`Label for ${order.number} sent to the printer`, 'ok'); }
+          catch (e) { toast(printProblem(e), 'err'); }
+        });
       }
       case 'wa': return call(key, async () => {
         const { link } = await get(`/api/orders/${order.id}/wa-link`);
@@ -174,7 +177,7 @@ export default function Board() {
       });
       default: return undefined;
     }
-  }, [call]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [call, withBusy, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onDragEnd = (r) => {
     const { destination: dst, source: src, draggableId } = r;
@@ -222,7 +225,7 @@ export default function Board() {
   const col = (title, count, children, cls = '', hint) => (
     <section className={`brd-col ${cls}`} aria-label={title}>
       <h3>{title}<span className="brd-count">{count}</span></h3>
-      <div className="brd-col-body">{count === 0 && hint ? <p className="brd-empty">{hint}</p> : null}{children}</div>
+      <div className="brd-col-body scroll">{count === 0 && hint ? <p className="brd-empty">{hint}</p> : null}{children}</div>
     </section>
   );
   const plain = (o, extra = {}) => <OrderCard key={o.id} order={o} snapAt={snapAt} settings={s} busy={busy.has(`o${o.id}`)} selected={selectedId === o.id} onAct={onAct} onSelect={select} {...extra} />;

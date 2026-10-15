@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import Supercluster from 'supercluster';
 import { baseStyle } from '../lib/map.js';
+
+// Vite bundles the MapLibre worker as its own file (the default worker lookup fails under Vite)
+maplibregl.setWorkerUrl(workerUrl);
 
 const LONDON = [-0.12, 51.5];
 // a plain background layer under the OSM tiles, so the data is still readable when tiles cannot load (offline)
@@ -10,10 +14,10 @@ const style = { ...baseStyle, layers: [{ id: 'ana-bg', type: 'background', paint
 
 const HEAT_PAINT = {
   'heatmap-weight': ['coalesce', ['get', 'weight'], 1],
-  'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 0.6, 15, 2],
+  'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 8, 0.35, 15, 1.4],
   'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 8, 8, 12, 24, 16, 48],
   'heatmap-opacity': 0.85,
-  'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(255,237,160,0)', 0.2, 'rgba(254,217,118,0.7)', 0.4, 'rgba(253,141,60,0.8)', 0.7, 'rgba(227,23,28,0.9)', 1, 'rgba(120,10,14,1)'],
+  'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(255,237,160,0)', 0.2, 'rgba(254,217,118,0.7)', 0.4, 'rgba(253,141,60,0.8)', 0.7, 'rgba(227,23,28,0.9)', 1, 'rgba(160,12,16,0.95)'],
 };
 
 /** Demand map: a MapLibre heatmap layer, or supercluster circles with counts (HTML markers, so no glyph/font server is needed). */

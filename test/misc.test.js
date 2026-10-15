@@ -254,3 +254,20 @@ test('OS Places adapter maps DPA records; address search uses it before Photon w
     assert.equal(out[0].from, 'os_places');
   } finally { await s.close(); }
 });
+
+test('shop time: London summer day boundaries and hour-of-week follow BST, not UTC', async () => {
+  const { dayRangeUtc, localDate, localParts } = await import('../lib/tz.js');
+  assert.deepEqual(dayRangeUtc('2026-10-15', 'Europe/London'), ['2026-10-14T23:00:00.000Z', '2026-10-15T23:00:00.000Z']);
+  assert.deepEqual(dayRangeUtc('2026-12-15', 'Europe/London'), ['2026-12-15T00:00:00.000Z', '2026-12-16T00:00:00.000Z']);
+  assert.equal(localDate(new Date('2026-10-14T23:30:00Z'), 'Europe/London'), '2026-10-15');
+  const lp = localParts(new Date('2026-10-16T20:30:00Z'), 'Europe/London');
+  assert.deepEqual([lp.dow, lp.h], [4, 21], 'Friday 21:xx local');
+  const ctx = makeCtx({ settings: { batch_hold_minutes: 0 } });
+  ctx.now.set('2026-10-14T23:30:00.000Z');          // 00:30 on the 15th in London
+  const o = await newOrder(ctx, 'SW11 5XX');
+  assert.match(o.number, /^TAD-20261015-001$/, 'order number uses shop-local date');
+  const eod = ctx.analytics.endOfDay('2026-10-15');
+  assert.equal(eod.orders, 1);
+  assert.equal(ctx.analytics.endOfDay('2026-10-14').orders, 0);
+  assert.throws(() => ctx.settings.set({ timezone: 'Mars/Base' }), /timezone/);
+});

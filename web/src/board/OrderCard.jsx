@@ -42,14 +42,13 @@ export default function OrderCard({ order, snapAt, settings, stopNo, nextRun, wa
         {stopNo != null && <span className="brd-stop" title="Stop number on the run">{stopNo}</span>}
         <span className="brd-no" title={order.number}>#{shortNo(order.number)}</span>
         <span className={`brd-kind ${isCollection ? 'col' : 'del'}`}><Icon name={isCollection ? 'bag' : 'bike'} size={14} />{isCollection ? 'Collection' : 'Delivery'}</span>
-        <span className="brd-src">{sourceLabel(order.source)}</span>
         <span className="brd-spacer" />
         {order.sla !== 'done' && st !== 'scheduled' && <span className={`brd-timer ${level}`}><Icon name="clock" size={14} /> <AgeTimer order={order} snapAt={snapAt} /></span>}
         {st === 'scheduled' && <span className="brd-timer"><Icon name="clock" size={14} /> {dayjs(order.scheduled_for).format('ddd HH:mm')}</span>}
         {st === 'failed' && order.failed_at && <span className="brd-timer late">Failed {dayjs(order.failed_at).format('HH:mm')}</span>}
       </div>
 
-      <div className="brd-who"><strong>{order.customer_name || 'No name'}</strong>{order.postcode && <span className="brd-pc">{order.postcode}</span>}</div>
+      <div className="brd-who"><strong>{order.customer_name || 'No name'}</strong>{order.postcode && <span className="brd-pc">{order.postcode}</span>}<span className="brd-src">{sourceLabel(order.source)}</span></div>
       {order.address_line && <div className="brd-addr">{order.address_line}</div>}
       <div className="brd-items" title={itemsSummary(order.items)}>{itemsSummary(order.items)}</div>
       {order.notes && <div className="brd-notes"><Icon name="warn" size={14} /> {order.notes}</div>}

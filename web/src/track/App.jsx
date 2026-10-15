@@ -31,12 +31,12 @@ function Skeleton() {
   );
 }
 
-function Steps({ steps }) {
+function Steps({ steps, finished }) {
   return (
     <ol className="steps" aria-label="Order progress">
       {steps.map((s) => (
-        <li key={s.key} className={`step${s.done ? ' done' : ''}${s.current ? ' current' : ''}`} aria-current={s.current ? 'step' : undefined}>
-          <span className="bullet" aria-hidden="true">{s.done && !s.current ? '✓' : ''}</span>
+        <li key={s.key} className={`step${s.done ? ' done' : ''}${s.current ? ' current' : ''}${s.current && finished ? ' final' : ''}`} aria-current={s.current ? 'step' : undefined}>
+          <span className="bullet" aria-hidden="true">{s.done && (!s.current || finished) ? '✓' : ''}</span>
           <span className="step-label">{s.label}<span className="sr-only">{s.current ? ' (current step)' : s.done ? ' (done)' : ' (to do)'}</span></span>
         </li>
       ))}
@@ -171,11 +171,11 @@ export default function App() {
         {!o.closed && !o.failed && (
           <section className="card" aria-labelledby="prog-h">
             <h2 id="prog-h">Progress</h2>
-            <Steps steps={viewSteps(o)} />
+            <Steps steps={viewSteps(o)} finished={finished} />
           </section>
         )}
 
-        {o.fulfilment === 'delivery' && !o.closed && !finished && (
+        {o.fulfilment === 'delivery' && !o.closed && !o.failed && !finished && (
           <Suspense fallback={<div className="card sk"><i className="sk-line w100 map" /></div>}>
             <TrackMap order={o} />
           </Suspense>

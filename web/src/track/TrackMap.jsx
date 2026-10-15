@@ -5,6 +5,7 @@ import { bearing } from './format.js';
 const ok = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng);
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const MOVE_MS = 4000;
+const PAD = { top: 70, bottom: 70, left: 50, right: 60 };
 
 function pinEl(kind, label) {
   const el = document.createElement('div');
@@ -44,9 +45,10 @@ export default function TrackMap({ order }) {
     const s = st.current;
     (async () => {
       try {
-        const [mod] = await Promise.all([import('maplibre-gl'), import('maplibre-gl/dist/maplibre-gl.css')]);
+        const [mod, worker] = await Promise.all([import('maplibre-gl'), import('maplibre-gl/dist/maplibre-gl-worker.mjs?url'), import('maplibre-gl/dist/maplibre-gl.css')]);
         if (dead || !box.current) return;
         const lib = mod.default || mod;
+        lib.setWorkerUrl(worker.default); // maplibre 6 ships its worker as a separate file; Vite must serve it explicitly
         const c = dest || shop;
         const map = new lib.Map({ container: box.current, style: baseStyle, center: c ? [c.lng, c.lat] : [-0.12, 51.5], zoom: 13, attributionControl: { compact: true }, cooperativeGestures: false });
         map.addControl(new lib.NavigationControl({ showCompass: false }), 'top-right');
@@ -71,7 +73,7 @@ export default function TrackMap({ order }) {
     if (pts.length === 1) { s.map.easeTo({ center: [pts[0].lng, pts[0].lat], zoom: 14, duration: animate ? 600 : 0 }); return; }
     const b = new s.lib.LngLatBounds();
     pts.forEach((p) => b.extend([p.lng, p.lat]));
-    s.map.fitBounds(b, { padding: { top: 60, bottom: 50, left: 50, right: 50 }, maxZoom: 16, duration: animate ? 800 : 0 });
+    s.map.fitBounds(b, { padding: PAD, maxZoom: 16, duration: animate ? 800 : 0 });
   }, [dest, shop]);
 
   // static markers
@@ -131,13 +133,13 @@ export default function TrackMap({ order }) {
       // fit around where the driver is heading, so the view is stable while the marker glides
       const b = new s.lib.LngLatBounds();
       [target, dest].filter(Boolean).forEach((p) => b.extend([p.lng, p.lat]));
-      if (dest) s.map.fitBounds(b, { padding: { top: 60, bottom: 50, left: 50, right: 50 }, maxZoom: 16, duration: first ? 0 : 1200 });
+      if (dest) s.map.fitBounds(b, { padding: PAD, maxZoom: 16, duration: first ? 0 : 1200 });
       else s.map.easeTo({ center: [target.lng, target.lat], duration: 1200 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, driver?.lat, driver?.lng, driver?.heading, !!driver]);
 
-  const recenter = () => { st.current.userMoved = false; if (driver && dest) { const s = st.current; const b = new s.lib.LngLatBounds(); [s.shown || driver, dest].forEach((p) => b.extend([p.lng, p.lat])); s.map.fitBounds(b, { padding: { top: 60, bottom: 50, left: 50, right: 50 }, maxZoom: 16, duration: 600 }); } else fit(true); };
+  const recenter = () => { st.current.userMoved = false; if (driver && dest) { const s = st.current; const b = new s.lib.LngLatBounds(); [s.shown || driver, dest].forEach((p) => b.extend([p.lng, p.lat])); s.map.fitBounds(b, { padding: PAD, maxZoom: 16, duration: 600 }); } else fit(true); };
 
   if (!dest && !shop) return null;
 

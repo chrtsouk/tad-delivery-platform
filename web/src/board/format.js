@@ -36,3 +36,10 @@ export function eventDetail(e) {
   if (d.source) bits.push(`via ${sourceLabel(d.source)}`);
   return bits.join(' · ');
 }
+
+/** The server hides the text of 5xx errors, so explain the two printer failures by their code. */
+export function printProblem(e) {
+  if (e?.code === 'not_configured') return 'No label printer is set up on the server. The label page opened in a new window, so you can print it from the browser.';
+  if (e?.code === 'printer_unreachable') return 'The label printer did not answer (is it on and on the network?). The label page opened in a new window, so you can print it from the browser.';
+  return `${e?.message || 'The label could not be printed'}. The label page opened in a new window, so you can print it from the browser.`;
+}

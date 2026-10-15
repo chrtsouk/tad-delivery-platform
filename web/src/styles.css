@@ -78,10 +78,12 @@ table { border-collapse: collapse; width: 100%; } th, td { text-align: left; pad
 .cal-new { background: var(--red); color: #fff; text-decoration: none; padding: 8px 14px; border-radius: 8px; font-weight: 600; }
 .cal-new:hover { background: #b91216; }
 .cal-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-left: auto; }
+.cal-tog { display: inline-flex; align-items: center; gap: 0; margin: 0; font-size: 13px; color: var(--ink); cursor: pointer; }
+.cal-tog input { width: auto; margin: 0 6px 0 0; }
 .cal-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
 .cal-sw-pre { background: var(--red); } .cal-sw-done { background: #e8a6a8; } .cal-sw-shift { background: var(--ink); } .cal-sw-open { background: repeating-linear-gradient(45deg, #1a7f37, #1a7f37 4px, #2f9a50 4px, #2f9a50 8px); }
 .cal-box { padding: 10px; overflow-x: auto; }
-.cal-box .rbc-calendar { min-width: 640px; }
+.cal-box .rbc-month-view, .cal-box .rbc-time-view, .cal-box .rbc-agenda-view { min-width: 600px; }
 .cal-box .rbc-today { background: #fff6f6; }
 .cal-box .rbc-toolbar button.rbc-active { background: var(--ink); color: #fff; border-color: var(--ink); box-shadow: none; }
 .cal-box .rbc-toolbar button { padding: 6px 12px; }
@@ -127,8 +129,8 @@ table { border-collapse: collapse; width: 100%; } th, td { text-align: left; pad
   body:has(.ana-page) main { padding: 0; max-width: none; }
   .ana-report .card { border: 1px solid #bbb; border-radius: 0; box-shadow: none; break-inside: avoid; }
   .ana-report > * + * { margin-top: 8px; }
-  .ana-kpis { grid-template-columns: repeat(5, 1fr); gap: 6px; }
-  .ana-kpi { padding: 6px 8px; } .ana-kpi-v { font-size: 20px; }
+  .ana-kpis { grid-template-columns: repeat(9, 1fr); gap: 4px; }
+  .ana-kpi { padding: 5px 6px; } .ana-kpi-v { font-size: 17px; } .ana-kpi-l { font-size: 9px; }
   .ana-report-title { font-size: 20px; margin-bottom: 6px; }
   .ana-report .grid2 { grid-template-columns: 1fr 1fr; gap: 8px; }
   .ana-report th, .ana-report td { padding: 3px 6px; }

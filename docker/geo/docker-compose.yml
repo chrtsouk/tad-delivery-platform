@@ -36,7 +36,7 @@ services:
     profiles: ["photon"]
     image: eclipse-temurin:21-jre
     working_dir: /photon
-    command: ["java", "-Xmx3g", "-jar", "photon.jar", "serve", "-listen-ip", "0.0.0.0"]
+    command: ["java", "-Xmx3g", "-jar", "photon.jar", "-listen-ip", "0.0.0.0"]   # 0.7.x CLI (no "serve" sub-command; that arrived in 1.x)
     volumes: ["photondata:/photon"]
     ports: ["2322:2322"]
     restart: unless-stopped

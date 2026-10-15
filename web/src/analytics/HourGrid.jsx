@@ -17,7 +17,7 @@ export default function HourGrid({ days, matrix }) {
       )}
       <div className="ana-hours-scroll">
         <table className="ana-hourtable">
-          <caption className="muted">Orders by weekday and hour of day (UTC)</caption>
+          <caption className="muted">Orders by weekday and hour of day (shop time)</caption>
           <thead>
             <tr><th scope="col" aria-label="Day" />{Array.from({ length: 24 }, (_, h) => <th key={h} scope="col">{pad(h)}</th>)}</tr>
           </thead>

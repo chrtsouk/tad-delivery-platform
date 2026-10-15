@@ -43,7 +43,16 @@ const insertOrder = (o) => q.run(ctx.db, `INSERT INTO orders(number, source, ext
   scheduled_for, created_at, accepted_at, ready_at, assigned_at, out_at, delivered_at, failed_at, cancelled_at, driver_id, fail_reason, rating) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?)`,
 o.number, o.source, o.external_id, 'delivery', o.state, o.name, o.phone, o.address, o.postcode, o.outcode, o.lat, o.lng, JSON.stringify([{ name: o.item, qty: 1 }]), 1, o.total, 249, o.scheduled_for ?? null,
 o.created, o.accepted ?? null, o.ready ?? null, o.assigned ?? null, o.out ?? null, o.delivered ?? null, o.failed ?? null, o.cancelled ?? null, o.driver ?? null, o.fail_reason ?? null, o.rating ?? null);
+// the audit rows the real app would have written for this order
+const auditFor = (o) => {
+  const log = (at, actor, action, detail) => q.run(ctx.db, 'INSERT INTO audit_log(at,actor,action,entity,entity_id,detail) VALUES(?,?,?,?,?,?)', at, actor, action, 'order', o.number, JSON.stringify({ number: o.number, ...detail }));
+  log(o.created, 'system', 'order.create', { source: o.source });
+  if (o.state === 'delivered') log(o.delivered, `driver:${o.driver}`, 'order.delivered', { from: 'out' });
+  if (o.state === 'failed') log(o.failed, `driver:${o.driver}`, 'order.failed', { from: 'out', reason: o.fail_reason });
+  if (o.state === 'cancelled') log(o.cancelled, 'admin', 'order.cancelled', { from: 'accepted', reason: o.fail_reason });
+};
 
+const addOrder = (o) => { insertOrder(o); auditFor(o); };
 let n = 0;
 for (let back = 21; back >= 0; back--) {
   const dayStart = day0 - back * 86400000;
@@ -69,11 +78,11 @@ for (let back = 21; back >= 0; back--) {
     const accepted = created + (1 + rnd() * 3) * 60000, ready = accepted + (9 + rnd() * 8) * 60000, assigned = ready + 60000, out = assigned + (2 + rnd() * 5) * 60000;
     const number = `TAD-HIST-${String(++n).padStart(4, '0')}`;
     const base = { number, source: pick(SOURCES), external_id: `hist-${n}`, name: pick(NAMES), phone: `07700900${String(n % 1000).padStart(3, '0')}`, address: `${1 + (n % 90)} Demo Road`, postcode: `${outcode} ${1 + (n % 9)}XX`, outcode, lat, lng, item: pick(['Wings x2', 'Burger', 'Tenders', 'Mega box', 'Wings']), total: 1500 + Math.floor(rnd() * 2500), created: iso(created) };
-    if (r < 0.06) insertOrder({ ...base, state: 'cancelled', accepted: iso(accepted), cancelled: iso(accepted + 4 * 60000), fail_reason: pick(CANCEL_REASONS) });
-    else if (r < 0.11) insertOrder({ ...base, state: 'failed', accepted: iso(accepted), ready: iso(ready), assigned: iso(assigned), out: iso(out), failed: iso(out + (10 + rnd() * 10) * 60000), driver, fail_reason: pick(FAIL_REASONS) });
+    if (r < 0.06) addOrder({ ...base, state: 'cancelled', accepted: iso(accepted), cancelled: iso(accepted + 4 * 60000), fail_reason: pick(CANCEL_REASONS) });
+    else if (r < 0.11) addOrder({ ...base, state: 'failed', accepted: iso(accepted), ready: iso(ready), assigned: iso(assigned), out: iso(out), failed: iso(out + (10 + rnd() * 10) * 60000), driver, fail_reason: pick(FAIL_REASONS) });
     else {
       const drop = out + (6 + rnd() * (driver === 'driver_leo' ? 22 : 14)) * 60000;
-      insertOrder({ ...base, state: 'delivered', accepted: iso(accepted), ready: iso(ready), assigned: iso(assigned), out: iso(out), delivered: iso(drop), driver, rating: rnd() < 0.5 ? 4 + Math.floor(rnd() * 2) : null, scheduled_for: rnd() < 0.12 ? iso(created + 3600000) : null });
+      addOrder({ ...base, state: 'delivered', accepted: iso(accepted), ready: iso(ready), assigned: iso(assigned), out: iso(out), delivered: iso(drop), driver, rating: rnd() < 0.5 ? 4 + Math.floor(rnd() * 2) : null, scheduled_for: rnd() < 0.12 ? iso(created + 3600000) : null });
     }
   }
 }

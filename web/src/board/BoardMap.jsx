@@ -1,10 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl'; // maplibre-gl 6 has named exports only (no default)
 import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { baseStyle } from '../lib/map.js';
 import { useSecond } from './clock.js';
 import { clock, itemsSummary, shortNo } from './format.js';
+
+// Vite moves maplibre's main chunk, so its default worker URL (next to the main file) 404s. Point it at the emitted worker file.
+maplibregl.setWorkerUrl(workerUrl);
 
 export const BATCH_COLOURS = ['#e3171c', '#1a6dff', '#1a7f37', '#b7791f', '#7a3cff', '#0e8f8f'];
 const STATE_COLOUR = { ready: '#d99a00', assigned: '#1a6dff', out: '#7a3cff' };

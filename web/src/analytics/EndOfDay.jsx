@@ -26,7 +26,7 @@ export function Report({ r, title }) {
         <Kpi label="Still open" value={fmtNum(r.still_open)} tone={r.still_open ? 'warn' : ''} />
         <Kpi label="Late" value={fmtNum(r.late)} tone={r.late ? 'bad' : ''} />
         <Kpi label="On time" value={fmtPct(r.on_time_pct)} />
-        <Kpi label="Avg order → door" value={fmtMin(r.avg_order_to_door_min)} />
+        <Kpi label="Avg order → door (min)" value={r.avg_order_to_door_min ?? '—'} />
       </div>
 
       <div className="grid2 ana-eod-grid">
@@ -75,7 +75,7 @@ export function Report({ r, title }) {
         {r.shifts.length === 0 ? <p className="muted">Nobody clocked in on this day.</p> : (
           <div className="ana-tablewrap">
             <table>
-              <thead><tr><th>Driver</th><th>Zone</th><th>Clocked in (UTC)</th><th>Clocked out (UTC)</th><th className="ana-num">Hours</th></tr></thead>
+              <thead><tr><th>Driver</th><th>Zone</th><th>Clocked in</th><th>Clocked out</th><th className="ana-num">Hours</th></tr></thead>
               <tbody>{r.shifts.map((s, i) => (
                 <tr key={`${s.driver_id}-${i}`}><td>{s.driver_name || s.driver_id}</td><td>{s.zone ?? '—'}</td><td>{hhmm(s.clock_in_at)}</td><td>{s.clock_out_at ? hhmm(s.clock_out_at) : <span className="pill warn">Still on shift</span>}</td><td className="ana-num">{s.hours ?? '—'}</td></tr>
               ))}</tbody>
@@ -83,7 +83,7 @@ export function Report({ r, title }) {
           </div>
         )}
       </section>
-      <p className="muted ana-foot">The day runs 00:00–24:00 UTC. Late = delivered more than the shop’s “late after” limit after the order was accepted. {fmtNum(r.audit_events)} audit events were logged.</p>
+      <p className="muted ana-foot">The day runs 00:00–24:00 shop time. Late = delivered more than the shop’s “late after” limit after the order was accepted. {fmtNum(r.audit_events)} audit events were logged.</p>
     </article>
   );
 }
@@ -125,7 +125,7 @@ export function EndOfDayTab() {
 
 /** Live picture of today: the same numbers as the end-of-day report, refreshed every 30 seconds. */
 export function TodayTab({ onOpenEod }) {
-  const rep = useFetch('/api/analytics/end-of-day?day=' + todayUtc(), { every: 30000 });
+  const rep = useFetch('/api/analytics/end-of-day?day=' + todayUtc(), { every: 30000, keepOnError: true });
   if (!rep.data) return <Status loading={rep.loading} error={rep.error} onRetry={rep.reload} />;
   return (
     <div className="ana-today">

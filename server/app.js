@@ -6,6 +6,7 @@ import { q } from '../lib/db.js';
 import { createAuth } from './auth.js';
 import { parseQr } from '../services/labels.js';
 import { safeEqual } from '../lib/tokens.js';
+import { localDate } from '../lib/tz.js';
 
 const json = express.json({ limit: '4mb' });
 const raw = express.raw({ type: '*/*', limit: '2mb' });
@@ -154,7 +155,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
 
   admin.get('/analytics/demand', (req, res) => res.json(analytics.demand({ from: req.query.from, to: req.query.to })));
   admin.get('/analytics/drivers', (req, res) => res.json({ drivers: analytics.driverPerformance({ from: req.query.from, to: req.query.to }) }));
-  admin.get('/analytics/end-of-day', (req, res) => res.json(analytics.endOfDay(String(req.query.day || now().toISOString().slice(0, 10)))));
+  admin.get('/analytics/end-of-day', (req, res) => res.json(analytics.endOfDay(String(req.query.day || localDate(now(), settings.get('timezone'))))));
   admin.get('/audit', (req, res) => res.json({ events: analytics.auditLog(Math.min(Number(req.query.limit) || 200, 1000), { from: req.query.from, to: req.query.to }) }));
   admin.get('/calendar', (req, res) => res.json(calendar(req.query.from, req.query.to)));
 
@@ -278,7 +279,9 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   /* --------------------------------------------------------- static web */
   if (fs.existsSync(webDir)) {
     app.use(express.static(webDir, { index: 'index.html', maxAge: '1h' }));
-    app.get('/t/:token', (req, res) => res.sendFile(path.join(webDir, 'track.html')));
+    app.get('/t/:token', (req, res) => res.sendFile(path.join(webDir, 'track.html'), { dotfiles: 'allow' }));
+    // client-side routes of the admin app: a reload on /add, /drivers… must still load the app
+    app.get(['/add', '/drivers', '/calendar', '/analytics', '/audit', '/settings'], (req, res) => res.sendFile(path.join(webDir, 'index.html'), { dotfiles: 'allow' }));
   } else {
     app.get('/', (req, res) => res.type('text').send('TAD delivery platform API is running. Build the web app with: npm run web:build'));
   }

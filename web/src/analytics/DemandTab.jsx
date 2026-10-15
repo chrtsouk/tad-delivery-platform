@@ -20,7 +20,8 @@ export default function DemandTab({ demand }) {
           <button type="button" className={mode === 'clusters' ? 'on' : ''} aria-pressed={mode === 'clusters'} onClick={() => setMode('clusters')}>Clusters</button>
         </div>
       </div>
-      {none && <Status empty emptyText="No delivery orders in this period, so there is nothing to map yet." />}
+      {none && <section className="card ana-card"><Status empty emptyText="No delivery orders in this period, so there is nothing to show yet. Try a wider date range." /></section>}
+      {!none && <>
       <section className="card ana-card">
         <h3>Where orders go</h3>
         <DemandMap points={data.points} mode={mode} />
@@ -46,6 +47,7 @@ export default function DemandTab({ demand }) {
           </div>
         )}
       </section>
+      </>}
     </div>
   );
 }

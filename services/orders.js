@@ -10,6 +10,7 @@ import { q, tx } from '../lib/db.js';
 import { AppError, text } from '../lib/util.js';
 import { normalisePostcode, normalisePhone, haversineKm } from '../lib/geo.js';
 import { sign } from '../lib/tokens.js';
+import { localDate } from '../lib/tz.js';
 
 export const STATES = ['scheduled', 'new', 'accepted', 'preparing', 'ready', 'assigned', 'out', 'delivered', 'collected', 'failed', 'removed', 'cancelled'];
 export const OPEN_STATES = ['new', 'accepted', 'preparing', 'ready', 'assigned', 'out'];
@@ -36,7 +37,7 @@ export function createOrders(ctx) {
   const need = (id) => { const o = byId(id); if (!o) throw new AppError('That order does not exist', 404, 'not_found'); return o; };
 
   function nextNumber() {
-    const day = iso().slice(0, 10).replace(/-/g, '');
+    const day = localDate(now(), settings.get('timezone')).replace(/-/g, '');
     const row = tx(db, () => {
       q.run(db, 'INSERT INTO order_seq(day,n) VALUES(?,1) ON CONFLICT(day) DO UPDATE SET n = n + 1', day);
       return q.get(db, 'SELECT n FROM order_seq WHERE day = ?', day);
