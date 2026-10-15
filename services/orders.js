@@ -141,7 +141,7 @@ export function createOrders(ctx) {
     const drop = await fleetbase.createPlace({ name: order.customer_name || order.address_line, street1: order.address_line, postal_code: order.postcode, country: 'GB', latitude: order.lat, longitude: order.lng, phone: order.customer_phone });
     const fb = await fleetbase.createOrder({
       pickup: pickup.id, dropoff: drop.id,
-      customer: order.customer_name ? { name: order.customer_name, phone: order.customer_phone, email: order.customer_email } : undefined,
+      customer: order.customer_name ? Object.fromEntries(Object.entries({ name: order.customer_name, phone: order.customer_phone, email: order.customer_email }).filter(([, v]) => v)) : undefined,
       notes: order.notes, meta: { tad_number: order.number, tad_id: order.id, source: order.source, items: order.items, postcode: order.postcode },
     });
     q.run(db, 'UPDATE orders SET fleetbase_order_id = ?, fleetbase_tracking = ? WHERE id = ? AND fleetbase_order_id IS NULL', fb.id, fb.tracking_number?.tracking_number ?? null, order.id);

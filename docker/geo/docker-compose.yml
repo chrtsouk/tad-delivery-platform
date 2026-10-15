@@ -1,0 +1,46 @@
+# Self-hosted routing + address stack. Everything is called directly over HTTP by the Node services.
+#   OSRM      http://localhost:5001   road routing (graph built by scripts/geo-osrm-prepare.sh)
+#   VROOM     http://localhost:3000   our OWN batching / sequencing solver (vroom-docker, BSD-2)
+#   postcodes http://localhost:8001   postcodes.io (MIT): postcode -> coordinates
+#   photon    http://localhost:2322   street / house autocomplete (Apache-2.0), profile "photon" — see scripts/geo-photon-prepare.sh
+name: tadgeo
+services:
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    command: ["osrm-routed", "--algorithm", "mld", "--max-table-size", "2000", "/data/region.osrm"]
+    volumes: ["osrmdata:/data:ro"]
+    ports: ["5001:5000"]
+    restart: unless-stopped
+
+  vroom:
+    image: ghcr.io/vroom-project/vroom-docker:v1.15.0
+    environment: { VROOM_ROUTER: osrm }
+    volumes: ["./vroom-config.yml:/conf/config.yml:ro"]
+    ports: ["3000:3000"]
+    depends_on: [osrm]
+    restart: unless-stopped
+
+  postcodes-db:
+    image: idealpostcodes/postcodes.io.db:latest
+    environment: { POSTGRES_DB: postcodesiodb, POSTGRES_USER: postcodesio, POSTGRES_PASSWORD: "${POSTCODES_DB_PASSWORD:-localonly}" }
+    restart: unless-stopped
+
+  postcodes:
+    image: idealpostcodes/postcodes.io:latest
+    environment: { POSTGRES_DATABASE: postcodesiodb, POSTGRES_USER: postcodesio, POSTGRES_PASSWORD: "${POSTCODES_DB_PASSWORD:-localonly}", POSTGRES_HOST: postcodes-db }
+    ports: ["8001:8000"]
+    depends_on: [postcodes-db]
+    restart: unless-stopped
+
+  photon:
+    profiles: ["photon"]
+    image: eclipse-temurin:21-jre
+    working_dir: /photon
+    command: ["java", "-Xmx3g", "-jar", "photon.jar", "serve", "-listen-ip", "0.0.0.0"]
+    volumes: ["photondata:/photon"]
+    ports: ["2322:2322"]
+    restart: unless-stopped
+
+volumes:
+  osrmdata:
+  photondata:
