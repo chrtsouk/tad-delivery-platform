@@ -1,6 +1,6 @@
 # Report (updated every pass)
 
-_Last updated: 15 Oct 2026, pass 1._
+_Last updated: 15 Oct 2026, end of pass 1. An independent review found 15 defects (stale Fleetbase status, unsettled runs, lost HubRise orders, phone parsing, …); all are fixed and have regression tests in `test/review.test.js`._
 
 ## What exists and what was actually run
 
@@ -8,7 +8,7 @@ _Last updated: 15 Oct 2026, pass 1._
 |---|---|---|
 | Fleetbase (unmodified official images) | **Running** in Docker (`docker/fleetbase`), admin + API key created, TAD logo in its Branding, delivery radius mirrored as a service area | `test-live/smoke.mjs` |
 | OSRM + VROOM + postcodes.io (+ Photon GB) | **Running** in Docker (`docker/geo`). OSRM graph = Greater London only (laptop RAM); all-GB needs ~16 GB RAM — set `PBF_URL`. postcodes.io has the full ONS data. Photon has the GB-only extract | live smoke + address search checked against all three |
-| Platform backend (batcher, shifts, ingest, orders, tracking, labels, analytics, hub sync, multi-site, Fleetbase reconcile) | **Built, 54 automated tests green** (in-memory, fakes) | `node --test 'test/**/*.test.js'` |
+| Platform backend (batcher, shifts, ingest, orders, tracking, labels, analytics, hub sync, multi-site, Fleetbase reconcile) | **Built, 71 automated tests green** (in-memory, fakes) | `node --test 'test/**/*.test.js'` |
 | Backend against the REAL stack | **Run end to end**: order in → Fleetbase order → VROOM/OSRM batch → Fleetbase dispatch → driver scan/start/deliver → tracking page → end-of-day | `test-live/smoke.mjs`, manual curl run, `test-live/ui-walk.mjs` |
 | Web UI (board, add order, scan, drivers, settings, analytics, calendar, audit, tracking page) | **Built; driven in real headless Chrome** on the live stack (login, clock a real Fleetbase driver in, Photon address search, create order, accept, ready, lands on the driver lane, scan check, every page renders, no console errors) | `test-live/ui-walk.mjs` + screenshots (deleted after) |
 | TAD Drivers (fork of Navigator) | **Code written, 70 jest tests + typecheck of the new code green** (re-run by the lead). **Never built into an APK and never run on a device** (no Android SDK here) | `tad-drivers` repo, `docs/BUILD_ANDROID.md` |

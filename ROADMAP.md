@@ -13,9 +13,10 @@
 10. Web UI: board, add order, drivers, settings, analytics, calendar, audit, tracking page (see REPORT.md for what was verified in a browser).
 11. TAD Drivers fork (see tad-drivers repo): clock in/out, bag scan, delivered/failed, notifications; cash/earnings removed.
 
-## In progress / next
-1. Photon GB index: download + live address-autocomplete check (script: `scripts/geo-photon-prepare.sh`).
-2. Full browser walkthrough of every screen on the live stack (not only the demo server).
-3. Android build of TAD Drivers (needs Android SDK + signing key — owner).
-4. Production deploy (VPS): GB-wide OSRM graph (needs ~16 GB RAM to extract), HTTPS, backups of `.data/tad.sqlite`.
-5. Real-account items only the owner can do: HubRise app registration, approved Uber Eats / Deliveroo / Just Eat keys, SMTP + VAPID keys, label printer address.
+12. Photon GB index installed and checked live (address autocomplete); browser walkthrough of the board/add/scan/drivers/settings/analytics/calendar/audit pages on the live stack; independent code review done and all 15 findings fixed with regression tests (71 tests).
+
+## Next (owner-only unless marked)
+1. Android build of TAD Drivers: needs Android SDK, signing keystore, Firebase `google-services.json`, Google Maps key, Transistorsoft licence (see `tad-drivers/docs/BUILD_ANDROID.md`), then a test on a real phone (the app has never run on a device).
+2. Production deploy (VPS): GB-wide OSRM graph (~16 GB RAM to extract), HTTPS in front of the platform, backups of `.data/tad.sqlite`, set `PUBLIC_URL`.
+3. Real accounts / hardware: HubRise app registration, approved Uber Eats / Deliveroo / Just Eat API keys (then verify the three mappers against real payloads), SMTP + VAPID keys, the label printer's address, the shop's real postcode/radius/fees in Settings.
+4. (Platform, later) swap customer-page polling for a Fleetbase socket subscription if volume ever needs it (DECISIONS 13); tile server of our own instead of OpenStreetMap's public tiles.
