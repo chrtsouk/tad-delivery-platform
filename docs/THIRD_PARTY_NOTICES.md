@@ -21,3 +21,14 @@ Both repos are AGPL-3.0. Everything below is used under its own licence; copyrig
 | dayjs | github.com/iamkun/dayjs | MIT | Timers on the SLA board |
 | omnifood (reference only) | github.com/glitchr-studio/omnifood | see repo | Order schema modelled on its `Order` |
 | HubRise client / tiny-tablet (reference only) | github.com/HubRise | MIT | OAuth / callback shape |
+| React, react-dom, react-router | github.com/facebook/react, remix-run/react-router | MIT | Admin web app + tracking page |
+| Vite | github.com/vitejs/vite | MIT | Web build |
+| MapLibre GL JS | github.com/maplibre/maplibre-gl-js | BSD-3-Clause | Maps, heatmap + cluster layers |
+| @hello-pangea/dnd | github.com/hello-pangea/dnd | Apache-2.0 | Drag orders between drivers on the board |
+| react-countdown | github.com/ndresx/react-countdown | MIT | (dependency available; board timers use dayjs) |
+| react-big-calendar | github.com/jquense/react-big-calendar | MIT | Staff / pre-order calendar |
+| Recharts | github.com/recharts/recharts | MIT | Analytics charts |
+| html5-qrcode (2.3.8) | github.com/mebjas/html5-qrcode | Apache-2.0 | Shop-side bag scan page |
+| Playwright (core) | github.com/microsoft/playwright | Apache-2.0 | Live browser walkthrough script only (dev dependency) |
+| OpenStreetMap tiles | openstreetmap.org | ODbL (data), tile usage policy | Base map raster tiles (attribution shown) |
+| TAD Drivers = fork of Navigator | github.com/fleetbase/navigator-app | AGPL-3.0 | see the tad-drivers repo's UPSTREAM.md and NOTICE files |

@@ -11,6 +11,7 @@ const Settings = lazy(() => import('./pages/Settings.jsx'));
 const Analytics = lazy(() => import('./pages/Analytics.jsx'));
 const Calendar = lazy(() => import('./pages/Calendar.jsx'));
 const Audit = lazy(() => import('./pages/Audit.jsx'));
+const Scan = lazy(() => import('./pages/Scan.jsx'));
 
 function Login({ onDone }) {
   const [pw, setPw] = useState('');
@@ -29,7 +30,7 @@ function Login({ onDone }) {
 }
 
 function Shell() {
-  const links = [['/', 'Board'], ['/add', 'Add order'], ['/drivers', 'Drivers'], ['/calendar', 'Calendar'], ['/analytics', 'Analytics'], ['/audit', 'Audit'], ['/settings', 'Settings']];
+  const links = [['/', 'Board'], ['/add', 'Add order'], ['/scan', 'Scan'], ['/drivers', 'Drivers'], ['/calendar', 'Calendar'], ['/analytics', 'Analytics'], ['/audit', 'Audit'], ['/settings', 'Settings']];
   return (
     <>
       <header className="top">
@@ -42,6 +43,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<Board />} />
             <Route path="/add" element={<AddOrder />} />
+            <Route path="/scan" element={<Scan />} />
             <Route path="/drivers" element={<Drivers />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/analytics" element={<Analytics />} />

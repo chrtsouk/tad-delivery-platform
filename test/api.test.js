@@ -355,3 +355,38 @@ test('postcode lookup for the settings page (shop location) and SPA/unknown API 
     assert.equal((await call('GET', '/api/geo/postcode?postcode=E1%206AN')).status, 401);
   } finally { await close(); }
 });
+
+test('orders CSV export: escapes commas and quotes, no secrets', async () => {
+  const { ctx, call, close } = await setup();
+  try {
+    await call('POST', '/api/orders', { headers: ADMIN, body: body({ customer: { name: 'Smith, "Bob"', phone: '07700 900222' }, items: [{ name: 'Wings, hot', qty: 2 }] }) });
+    const r = await call('GET', '/api/orders-export.csv', { headers: ADMIN });
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('content-type'), /text\/csv/);
+    const lines = r.data.trim().split('\n');
+    assert.equal(lines.length, 2);
+    assert.ok(lines[1].includes('"Smith, ""Bob"""'));
+    assert.ok(lines[1].includes('"2 x Wings, hot"'));
+    assert.ok(!r.data.includes('07700') && !r.data.includes('track_token'), 'no phone numbers or tokens in the export');
+    assert.equal((await call('GET', '/api/orders-export.csv')).status, 401);
+  } finally { await close(); }
+});
+
+test('shop-side scan: says whose bag it is, marks it picked, refuses unknown/foreign codes', async () => {
+  const { ctx, call, close } = await setup({ settings: { batch_hold_minutes: 0 } });
+  try {
+    await clockIn(ctx, 'driver_a');
+    const r = await call('POST', '/api/orders', { headers: ADMIN, body: body() });
+    const o = r.data.order;
+    assert.equal((await call('POST', '/api/scan', { headers: ADMIN, body: { code: `TAD|${o.number}` } })).data.ok, false, 'not ready yet');
+    ctx.orders.transition(o.id, 'accepted'); ctx.orders.transition(o.id, 'ready');
+    await ctx.batcher.tick();
+    const s = await call('POST', '/api/scan', { headers: ADMIN, body: { code: `TAD|${o.number}` } });
+    assert.equal(s.data.ok, true);
+    assert.equal(s.data.driver_id, 'driver_a');
+    assert.match(s.data.message, /Hand to/);
+    assert.ok(ctx.orders.byId(o.id).picked_at);
+    assert.equal((await call('POST', '/api/scan', { headers: ADMIN, body: { code: 'hello' } })).status, 422);
+    assert.equal((await call('POST', '/api/scan', { body: { code: `TAD|${o.number}` } })).status, 401);
+  } finally { await close(); }
+});

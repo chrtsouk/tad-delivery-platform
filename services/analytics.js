@@ -83,5 +83,15 @@ export function createAnalytics(ctx) {
     };
   }
 
-  return { demand, driverPerformance, endOfDay, auditLog: (limit, range_) => audit.recent(limit, range_) };
+  const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  /** Orders as CSV (no money columns beyond the order total the customer already paid online). */
+  function ordersCsv({ from, to } = {}) {
+    const r = range(from, to);
+    const rows = q.all(db, 'SELECT * FROM orders WHERE created_at >= ? AND created_at < ? ORDER BY created_at', r.from, r.to);
+    const head = ['number', 'created_at', 'source', 'fulfilment', 'state', 'customer_name', 'postcode', 'items', 'driver_id', 'accepted_at', 'ready_at', 'out_at', 'delivered_at', 'minutes_order_to_door', 'fail_reason', 'rating'];
+    const lines = rows.map((o) => [o.number, o.created_at, o.source, o.fulfilment, o.state, o.customer_name, o.postcode, JSON.parse(o.items_json).map((i) => `${i.qty} x ${i.name}`).join('; '), o.driver_id, o.accepted_at, o.ready_at, o.out_at, o.delivered_at, mins(o.accepted_at ?? o.created_at, o.delivered_at)?.toFixed(1), o.fail_reason, o.rating].map(csvCell).join(','));
+    return [head.join(','), ...lines].join('\n') + '\n';
+  }
+
+  return { demand, driverPerformance, endOfDay, ordersCsv, auditLog: (limit, range_) => audit.recent(limit, range_) };
 }

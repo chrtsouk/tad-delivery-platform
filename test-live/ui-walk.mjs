@@ -15,6 +15,14 @@ page.on('pageerror', (e) => errors.push(String(e)));
 const shot = (n) => page.screenshot({ path: `.tmp-test/ui/${n}.png` });
 const ok = (m) => console.log('✔', m);
 
+// start from a clean slate: finish anything left from an earlier run
+const A = { Authorization: `Bearer ${process.env.ADMIN_API_TOKEN}`, 'Content-Type': 'application/json' };
+const api = async (m, p, b) => (await fetch(base + p, { method: m, headers: A, body: b ? JSON.stringify(b) : undefined })).json();
+let board = await api('GET', '/api/board');
+for (const b of board.batches.filter((x) => x.status === 'assigned')) await api('POST', `/api/batcher/runs/${b.id}/out`);
+board = await api('GET', '/api/board');
+for (const o of board.orders.filter((x) => ['out'].includes(x.state))) await api('POST', `/api/orders/${o.id}/transition`, { to: 'delivered' });
+for (const o of (await api('GET', '/api/board')).orders.filter((x) => ['new', 'accepted', 'preparing', 'ready'].includes(x.state))) await api('POST', `/api/orders/${o.id}/transition`, { to: 'cancelled', reason: 'ui-walk cleanup' });
 await page.goto(base);
 await page.fill('#pw', process.env.ADMIN_PASSWORD);
 await page.click('button[type=submit]');
@@ -59,6 +67,12 @@ await page.locator('.brd-col.drivers', { hasText: 'Test Driver' }).locator(`[ari
 ok('order accepted, marked ready and batched onto the driver lane (real VROOM/OSRM/Fleetbase)');
 await shot('05-board-assigned');
 
+await page.click('nav >> text=Scan');
+await page.getByLabel('Order number').fill(number);
+await page.getByRole('button', { name: 'Check' }).click();
+await page.waitForSelector('text=/Hand to Test Driver|Already out with/', { timeout: 10000 });
+ok('shop-side bag check says whose bag it is');
+await shot('05b-scan');
 for (const [name, sel] of [['Calendar', 'text=Calendar'], ['Analytics', 'text=Analytics'], ['Audit', 'text=Audit'], ['Settings', 'text=Settings']]) {
   await page.click(`nav >> ${sel}`);
   await page.waitForTimeout(1200);

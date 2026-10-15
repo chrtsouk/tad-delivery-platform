@@ -154,6 +154,20 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   admin.get('/orders/:id/label', async (req, res) => { const o = orders.need(intParam(req.params.id)); res.type('html').send(await labels.html(o)); });
   admin.get('/orders/:id/label.svg', async (req, res) => { const o = orders.need(intParam(req.params.id)); res.type('image/svg+xml').send(await labels.svg(o)); });
   admin.post('/orders/:id/print', async (req, res) => { const o = orders.need(intParam(req.params.id)); orders.event(o.id, 'label_printed'); res.json(await labels.print(o)); });
+  // Shop-side bag check: staff scan a label at the counter; it says whose bag it is and marks it picked
+  admin.post('/scan', (req, res) => {
+    const number = parseQr(req.body?.code ?? req.body?.number);
+    if (!number) fail('That is not a Texas After Dark bag label', 422, 'bad_code');
+    const o = orders.byNumber(number);
+    if (!o) fail('That order does not exist', 404, 'not_found');
+    const driverName = o.driver_id ? q.get(ctx.db, 'SELECT driver_name AS n FROM driver_shifts WHERE driver_id = ? ORDER BY id DESC LIMIT 1', o.driver_id)?.n ?? o.driver_id : null;
+    if (['assigned', 'out'].includes(o.state)) {
+      q.run(ctx.db, 'UPDATE orders SET picked_at = COALESCE(picked_at, ?) WHERE id = ?', now().toISOString(), o.id);
+      orders.event(o.id, 'bag_scanned', { by: 'shop' });
+    }
+    res.json({ order: { id: o.id, number: o.number, state: o.state, name: o.customer_name, postcode: o.postcode, items: o.items, stop_seq: o.stop_seq }, driver_id: o.driver_id, driver_name: driverName, ok: ['assigned', 'out'].includes(o.state),
+      message: o.state === 'assigned' ? `Hand to ${driverName}` : o.state === 'out' ? `Already out with ${driverName}` : `Order is ${o.state}` });
+  });
   admin.get('/orders/:id/wa-link', (req, res) => {
     const o = orders.need(intParam(req.params.id));
     const kind = String(req.query.kind || 'out');
@@ -163,6 +177,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   admin.get('/analytics/demand', (req, res) => res.json(analytics.demand({ from: req.query.from, to: req.query.to })));
   admin.get('/analytics/drivers', (req, res) => res.json({ drivers: analytics.driverPerformance({ from: req.query.from, to: req.query.to }) }));
   admin.get('/analytics/end-of-day', (req, res) => res.json(analytics.endOfDay(String(req.query.day || localDate(now(), settings.get('timezone'))))));
+  admin.get('/orders-export.csv', (req, res) => res.type('text/csv').set('Content-Disposition', 'attachment; filename="tad-orders.csv"').send(analytics.ordersCsv({ from: req.query.from, to: req.query.to })));
   admin.get('/audit', (req, res) => res.json({ events: analytics.auditLog(Math.min(Number(req.query.limit) || 200, 1000), { from: req.query.from, to: req.query.to }) }));
   admin.get('/calendar', (req, res) => res.json(calendar(req.query.from, req.query.to)));
 
@@ -288,7 +303,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     app.use(express.static(webDir, { index: 'index.html', maxAge: '1h' }));
     app.get('/t/:token', (req, res) => res.sendFile(path.join(webDir, 'track.html'), { dotfiles: 'allow' }));
     // client-side routes of the admin app: a reload on /add, /drivers… must still load the app
-    app.get(['/add', '/drivers', '/calendar', '/analytics', '/audit', '/settings'], (req, res) => res.sendFile(path.join(webDir, 'index.html'), { dotfiles: 'allow' }));
+    app.get(['/add', '/scan', '/drivers', '/calendar', '/analytics', '/audit', '/settings'], (req, res) => res.sendFile(path.join(webDir, 'index.html'), { dotfiles: 'allow' }));
   } else {
     app.get('/', (req, res) => res.type('text').send('TAD delivery platform API is running. Build the web app with: npm run web:build'));
   }

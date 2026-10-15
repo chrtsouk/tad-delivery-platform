@@ -36,10 +36,15 @@ export function createTracking(ctx) {
     return null;
   }
 
+  // many customers' pages may ask about the same driver: ask Fleetbase at most once every 3 seconds per driver
+  const driverCache = new Map();
   async function driverPoint(o) {
     if (!o.driver_id) return null;
     try {
-      const d = await fleetbase.driver(o.driver_id);
+      const hit = driverCache.get(o.driver_id);
+      let d;
+      if (hit && now().getTime() - hit.at < 3000) d = hit.d;
+      else { d = await fleetbase.driver(o.driver_id); driverCache.set(o.driver_id, { at: now().getTime(), d }); }
       const c = d.location?.coordinates;
       if (c && (c[0] || c[1])) return { lat: c[1], lng: c[0], name: (d.name || '').split(' ')[0], phone: d.phone || null, heading: d.heading ?? null };
     } catch (e) { logger.debug?.(e.message); }
