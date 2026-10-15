@@ -1,1 +1,0 @@
-const t={},e=t?.VITE_TILE_URL||"https://tile.openstreetmap.org/{z}/{x}/{y}.png",s={version:8,sources:{osm:{type:"raster",tiles:[e],tileSize:256,attribution:"© OpenStreetMap contributors"}},layers:[{id:"osm",type:"raster",source:"osm"}]};export{s as b};

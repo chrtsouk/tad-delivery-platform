@@ -12,3 +12,5 @@ docker/fleetbase/.env
 docker/fleetbase/api.env
 docker/fleetbase/console.config.json
 docker/fleetbase/.admin-password
+dist/
+web/dist/
