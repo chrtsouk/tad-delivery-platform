@@ -192,8 +192,11 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   admin.get('/incidents.csv', (req, res) => res.type('text/csv').set('Content-Disposition', 'attachment; filename="tad-incidents.csv"').send(ctx.incidents.csv(incidentFilter(req))));
   admin.post('/incidents', (req, res) => {
     const b = req.body || {};
+    let orderId = null;
+    if (b.order_number) { const o = orders.byNumber(String(b.order_number).trim().toUpperCase()); if (!o) fail(`There is no order ${b.order_number}`, 404, 'not_found'); orderId = o.id; }
+    else if (b.order_id != null && b.order_id !== '') orderId = intParam(b.order_id, 'order_id');
     const photo = b.photo ? savePhoto(b.photo, 'incident') : null;
-    res.status(201).json({ incident: ctx.incidents.create({ type: b.type, note: b.note, photo, orderId: b.order_id != null && b.order_id !== '' ? intParam(b.order_id, 'order_id') : null, driverId: b.driver_id || null, reporter: 'admin' }) });
+    res.status(201).json({ incident: ctx.incidents.create({ type: b.type, note: b.note, photo, orderId, driverId: b.driver_id || null, reporter: 'admin' }) });
   });
   admin.post('/incidents/:id/resolve', (req, res) => res.json({ incident: ctx.incidents.resolve(intParam(req.params.id), { note: req.body?.note }) }));
 
@@ -283,7 +286,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   app.use('/driver', driver);
 
   /* ------------------------------------------------------------- helpers */
-  const incidentFilter = (req) => ({ from: req.query.from, to: req.query.to, status: req.query.status, type: req.query.type, orderId: req.query.order_id ? intParam(req.query.order_id, 'order_id') : undefined, driverId: req.query.driver_id });
+  const incidentFilter = (req) => ({ from: req.query.from, to: req.query.to, status: req.query.status, type: req.query.type, orderId: req.query.order_id ? intParam(req.query.order_id, 'order_id') : undefined, driverId: req.query.driver_id, limit: Math.min(Number(req.query.limit) || 500, 5000) });
   function mine(driverId, orderId) { const o = orders.need(orderId); if (o.driver_id !== driverId) fail('That order is not on your run', 403, 'not_yours'); return o; }
 
   function driverRun(driverId) {

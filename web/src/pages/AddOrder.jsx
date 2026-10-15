@@ -41,12 +41,31 @@ export default function AddOrder() {
   const [error, setError] = useState(null);
   const [done, setDone] = useState(null);
   const [printMsg, setPrintMsg] = useState(null);
+  const [fields, setFields] = useState([]);
+  const [custom, setCustom] = useState({});
+  const [flag, setFlag] = useState(null);
+  const [warnings, setWarnings] = useState([]);
   const phoneRef = useRef(null);
   const reqBook = useRef(0);
   const reqSearch = useRef(0);
 
   const dPhone = useDebounced(phone, 250);
   const dQ = useDebounced(q, 250);
+  const dLine1 = useDebounced(line1, 400);
+  const dPostcode = useDebounced(postcode, 400);
+
+  useEffect(() => { get('/api/settings').then((s) => setFields(s.custom_fields || [])).catch(() => {}); }, []);
+
+  /* is this phone or address flagged / blocked? */
+  useEffect(() => {
+    const p = digits(dPhone).length >= 6 ? dPhone : '';
+    const a = fulfilment === 'delivery' && dLine1.trim() && dPostcode.trim().length >= 5;
+    if (!p && !a) { setFlag(null); return undefined; }
+    let live = true;
+    const qs = new URLSearchParams({ ...(p ? { phone: p } : {}), ...(a ? { line1: dLine1.trim(), postcode: dPostcode.trim() } : {}) });
+    get(`/api/flags/check?${qs}`).then((r) => live && setFlag(r.level ? r : null)).catch(() => live && setFlag(null));
+    return () => { live = false; };
+  }, [dPhone, dLine1, dPostcode, fulfilment]);
 
   /* address book by phone: as soon as 6+ digits are typed */
   useEffect(() => {
@@ -92,13 +111,14 @@ export default function AddOrder() {
 
   const reset = () => {
     setPhone(''); setName(''); setEmail(''); setFulfilment('delivery'); setLine1(''); setPostcode(''); setGeo(null); setItems([newRow()]); setNotes('');
-    setLater(false); setWhen(''); setTotal(''); setQ(''); setResults([]); setError(null); setDone(null); setPrintMsg(null);
+    setLater(false); setWhen(''); setTotal(''); setQ(''); setResults([]); setError(null); setDone(null); setPrintMsg(null); setCustom({}); setFlag(null); setWarnings([]);
     setTimeout(() => phoneRef.current?.focus(), 0);
   };
 
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, { override = false } = {}) => {
+    e?.preventDefault();
     if (busy) return;
+    for (const f of fields) if (f.required && f.type !== 'checkbox' && !String(custom[f.key] ?? '').trim()) return setError({ message: `${f.label} is needed.`, field: `cf-${f.key}` });
     const rows = items.map((r) => ({ name: r.name.trim(), qty: Math.max(1, Math.round(Number(r.qty) || 1)) })).filter((r) => r.name);
     if (!rows.length) return setError({ message: 'Add at least one item.', field: 'items' });
     if (fulfilment === 'delivery' && !line1.trim()) return setError({ message: 'The delivery address is needed.', field: 'address' });
@@ -118,11 +138,11 @@ export default function AddOrder() {
     const body = {
       fulfilment, paid: true, items: rows,
       customer: Object.fromEntries(Object.entries({ name: name.trim(), phone: phone.trim(), email: email.trim() }).filter(([, v]) => v)),
-      notes: notes.trim() || undefined, total_pence, scheduled_for,
+      notes: notes.trim() || undefined, total_pence, scheduled_for, custom, ...(override ? { override_block: true } : {}),
     };
     if (fulfilment === 'delivery') body.address = { line1: line1.trim(), postcode: postcode.trim(), ...(geo || {}) };
     setBusy(true); setError(null);
-    try { const r = await post('/api/orders', body); setDone(r.order); }
+    try { const r = await post('/api/orders', body); setWarnings(r.warnings || []); setDone(r.order); }
     catch (x) { setError({ message: x.message, code: x.code, field: x.code === 'outside_area' || x.code === 'unknown_postcode' ? 'address' : undefined }); }
     finally { setBusy(false); }
   };
@@ -145,6 +165,7 @@ export default function AddOrder() {
           <button type="button" className="primary" onClick={reset}>Add another</button>
           <Link to="/" className="btn">Back to the board</Link>
         </div>
+        {warnings.map((w, i) => <div key={i} className="err" role="status">{w.override ? 'Added over a block' : w.level === 'blocked' ? 'Blocked customer' : 'Flagged customer'}: {w.reasons.join('; ')}</div>)}
         {printMsg && <div className={printMsg.ok ? 'ok' : 'err'} role="status">{printMsg.text}</div>}
       </div>
     );
@@ -159,6 +180,13 @@ export default function AddOrder() {
       <h2>Add a new order</h2>
       <p className="muted">For orders taken by phone or in person. The customer has already paid online.</p>
       {error && !error.field && <div className="err" role="alert">{error.message}</div>}
+      {flag && (
+        <div className={`add-flag ${flag.level}`} role="alert">
+          <strong>{flag.level === 'blocked' ? 'Blocked: this customer or address cannot order.' : 'Flagged: take care with this customer or address.'}</strong>
+          {flag.matches.map((m) => <div key={m.id}>{m.kind === 'phone' ? 'Phone' : 'Address'}: {m.reason}</div>)}
+          {flag.level === 'blocked' && <div className="row" style={{ marginTop: 6 }}><span>You can still add the order if you are sure.</span><button type="button" className="danger" disabled={busy} onClick={() => submit(null, { override: true })}>Add anyway (override block)</button></div>}
+        </div>
+      )}
 
       <div className="add-grid">
         <section className="card">
@@ -241,6 +269,27 @@ export default function AddOrder() {
 
           <label htmlFor="add-notes" className="add-gap">Notes for the kitchen / driver</label>
           <textarea id="add-notes" rows={2} value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Ring the top bell, no mayo" />
+
+          {fields.length > 0 && (
+            <div className="add-custom add-gap">
+              {fields.map((f) => {
+                const id = `cf-${f.key}`;
+                const val = custom[f.key];
+                const set = (v) => setCustom((c) => ({ ...c, [f.key]: v }));
+                return (
+                  <div key={f.key}>
+                    {f.type === 'checkbox'
+                      ? <label className="add-check"><input type="checkbox" id={id} checked={val === true} onChange={(e) => set(e.target.checked)} /> {f.label}</label>
+                      : <label htmlFor={id}>{f.label}{f.required ? '' : ' (optional)'}</label>}
+                    {f.type === 'text' && <input id={id} value={val ?? ''} maxLength={200} onChange={(e) => set(e.target.value)} autoComplete="off" />}
+                    {f.type === 'number' && <input id={id} type="number" inputMode="decimal" step="any" value={val ?? ''} onChange={(e) => set(e.target.value)} />}
+                    {f.type === 'choice' && <select id={id} value={val ?? ''} onChange={(e) => set(e.target.value)}><option value="">Choose…</option>{f.choices.map((c) => <option key={c} value={c}>{c}</option>)}</select>}
+                    {fieldErr(id)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="add-two add-gap">
             <div>

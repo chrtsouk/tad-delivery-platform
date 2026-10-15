@@ -17,6 +17,7 @@ export function clock(totalSeconds) {
 const EVENT_LABELS = {
   created: 'Order created', label_printed: 'Label printed', bag_scanned: 'Bag scanned by driver', fleetbase_synced: 'Sent to the dispatch system',
   fleetbase_dispatched: 'Dispatched to the driver app', fleetbase_dispatch_failed: 'Dispatch to the driver app failed',
+  incident: 'Incident reported', flag_warning: 'Customer is flagged', block_overridden: 'Block overridden by the shop',
 };
 const STATE_LABELS = { scheduled: 'Scheduled', new: 'New', accepted: 'Accepted', preparing: 'Preparing', ready: 'Ready', assigned: 'Given to a driver', out: 'Out for delivery', delivered: 'Delivered', collected: 'Collected', failed: 'Delivery failed', removed: 'Removed', cancelled: 'Cancelled' };
 export const stateLabel = (s) => STATE_LABELS[s] || s;

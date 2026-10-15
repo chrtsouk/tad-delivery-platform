@@ -4,6 +4,8 @@ import { get, post } from '../lib/api.js';
 import AskDialog from '../components/AskDialog.jsx';
 import Icon from '../components/Icon.jsx';
 import Modal from '../components/Modal.jsx';
+import TrailModal from '../components/TrailModal.jsx';
+import IncidentModal from '../components/IncidentModal.jsx';
 import { useToasts } from '../components/Toasts.jsx';
 import '../components/ui.css';
 import '../components/pages.css';
@@ -35,7 +37,7 @@ function TokenModal({ token, driver, onClose }) {
   );
 }
 
-function DriverCard({ d, onDone, toast, setDialog, setToken }) {
+function DriverCard({ d, onDone, toast, setDialog, setToken, setTrail, setIncident }) {
   const [zone, setZone] = useState('');
   const [busy, setBusy] = useState('');
   const run = async (what, fn, ok) => {
@@ -77,6 +79,8 @@ function DriverCard({ d, onDone, toast, setDialog, setToken }) {
           confirmText: 'Issue token',
           onSubmit: async () => { const r = await post(`/api/drivers/${d.id}/token`); setToken({ token: r.token, driver: d.name || d.id }); },
         })}>Issue app token</button>
+        <button type="button" onClick={() => setTrail(d)}>Route history</button>
+        <button type="button" onClick={() => setIncident(d)}>Report incident</button>
       </div>
     </article>
   );
@@ -88,6 +92,8 @@ export default function Drivers() {
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState(null);
   const [token, setToken] = useState(null);
+  const [trail, setTrail] = useState(null);
+  const [incident, setIncident] = useState(null);
   const [range, setRange] = useState('7d');
   const [perf, setPerf] = useState({ loading: true, rows: [], err: '' });
 
@@ -134,7 +140,7 @@ export default function Drivers() {
       {data && data.fleetbase === null && <div className="err" role="alert">The dispatch system (Fleetbase) did not answer, so only drivers who are clocked in are shown.</div>}
       {data && drivers.length === 0 && !error && <p className="ui-empty card">No drivers yet. Add drivers in Fleetbase and they will appear here.</p>}
       <div className="drv-grid">
-        {drivers.map((d) => <DriverCard key={d.id} d={d} onDone={load} toast={toast} setDialog={setDialog} setToken={setToken} />)}
+        {drivers.map((d) => <DriverCard key={d.id} d={d} onDone={load} toast={toast} setDialog={setDialog} setToken={setToken} setTrail={setTrail} setIncident={setIncident} />)}
       </div>
 
       <section className="card drv-perf">
@@ -165,6 +171,8 @@ export default function Drivers() {
 
       {dialog && <AskDialog {...dialog} onClose={() => setDialog(null)} />}
       {token && <TokenModal token={token.token} driver={token.driver} onClose={() => setToken(null)} />}
+      {trail && <TrailModal driver={trail} onClose={() => setTrail(null)} />}
+      {incident && <IncidentModal driverId={incident.id} drivers={drivers.map((x) => ({ id: x.id, name: x.name }))} onClose={() => setIncident(null)} onDone={() => toast('Incident saved', 'ok')} />}
       {node}
     </div>
   );

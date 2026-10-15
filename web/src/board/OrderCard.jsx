@@ -49,8 +49,10 @@ export default function OrderCard({ order, snapAt, settings, stopNo, nextRun, wa
       </div>
 
       <div className="brd-who"><strong>{order.customer_name || 'No name'}</strong>{order.postcode && <span className="brd-pc">{order.postcode}</span>}<span className="brd-src">{sourceLabel(order.source)}</span></div>
+      {order.flag && <div className={`brd-flag ${order.flag.level}`} role="alert"><Icon name="warn" size={14} /> {order.flag.level === 'blocked' ? 'Blocked customer' : 'Flagged customer'}: {order.flag.reasons.join('; ')}</div>}
       {order.address_line && <div className="brd-addr">{order.address_line}</div>}
       <div className="brd-items" title={itemsSummary(order.items)}>{itemsSummary(order.items)}</div>
+      {order.custom_view?.length > 0 && <div className="brd-custom">{order.custom_view.map((c) => <div key={c.key}><strong>{c.label}:</strong> {c.value}</div>)}</div>}
       {order.notes && <div className="brd-notes"><Icon name="warn" size={14} /> {order.notes}</div>}
       {nextRun && <div className="brd-nextrun">Next run — waiting for the driver to return</div>}
       {wait !== undefined && st === 'ready' && !isCollection && <WaitBadge info={wait} snapAt={snapAt} />}
@@ -77,6 +79,8 @@ export default function OrderCard({ order, snapAt, settings, stopNo, nextRun, wa
           <button type="button" onClick={act('label')}>Print label</button>
           <button type="button" onClick={act('wa')} disabled={!order.customer_phone} title={order.customer_phone ? '' : 'No phone number on this order'}>WhatsApp</button>
           <button type="button" onClick={act('timeline')}>Timeline</button>
+          <button type="button" onClick={act('flag')} disabled={!order.customer_phone && !order.address_line} title="Flag or block this customer or address">Flag customer</button>
+          <button type="button" onClick={act('incident')}>Report incident</button>
         </div>
       )}
     </article>

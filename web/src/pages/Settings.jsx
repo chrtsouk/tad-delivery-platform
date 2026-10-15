@@ -21,7 +21,10 @@ const SECTIONS = {
   dispatch: (s) => ({ max_tasks: str(s.max_tasks), strategy: s.strategy, max_gap_minutes: str(s.max_gap_minutes), batch_hold_minutes: str(s.batch_hold_minutes), cluster_merge_km: str(s.cluster_merge_km), return_push_minutes: str(s.return_push_minutes), service_minutes_per_drop: str(s.service_minutes_per_drop) }),
   timing: (s) => ({ warn_after_minutes: str(s.warn_after_minutes), late_after_minutes: str(s.late_after_minutes), prep_minutes: str(s.prep_minutes), default_eta_minutes: str(s.default_eta_minutes) }),
   alerts: (s) => ({ show_driver_phone: Boolean(s.show_driver_phone), sound: Boolean(s.sound) }),
+  trails: (s) => ({ trail_retention_days: str(s.trail_retention_days) }),
+  custom: (s) => ({ custom_fields: s.custom_fields.map((f) => ({ key: ++bandKey, fieldKey: f.key, label: f.label, type: f.type, required: Boolean(f.required), show_on_driver: Boolean(f.show_on_driver), choices: (f.choices || []).join(', ') })) }),
 };
+const FIELD_TYPES = [['text', 'Text'], ['number', 'Number'], ['choice', 'Choice from a list'], ['checkbox', 'Tick box']];
 
 function num(v, label, min, max, { int = false } = {}) {
   const n = Number(String(v).trim());
@@ -56,6 +59,16 @@ function payload(section, f, saved) {
       if (warn >= late) throw new Error('The amber warning must come before the late time.');
       return { warn_after_minutes: warn, late_after_minutes: late, prep_minutes: num(f.prep_minutes, 'Prep time', 0, 600), default_eta_minutes: num(f.default_eta_minutes, 'Default delivery time', 0, 600) };
     }
+    case 'trails': return { trail_retention_days: num(f.trail_retention_days, 'Keep GPS history for', 0, 3650, { int: true }) };
+    case 'custom': return {
+      custom_fields: f.custom_fields.map((x, i) => {
+        const label = x.label.trim();
+        if (!label) throw new Error(`Field ${i + 1} needs a label.`);
+        const choices = x.type === 'choice' ? x.choices.split(',').map((c) => c.trim()).filter(Boolean) : [];
+        if (x.type === 'choice' && choices.length < 2) throw new Error(`"${label}" is a choice field: give it at least two choices, separated by commas.`);
+        return { ...(x.fieldKey ? { key: x.fieldKey } : {}), label, type: x.type, required: x.type === 'checkbox' ? false : x.required, show_on_driver: x.show_on_driver, choices };
+      }),
+    };
     default: return { show_driver_phone: f.show_driver_phone, sound: f.sound };
   }
 }
@@ -268,6 +281,37 @@ export default function Settings() {
       <Section id="alerts" title="Customers and alerts" {...sec('alerts')}>
         <label className="set-check"><input type="checkbox" checked={form.show_driver_phone} onChange={(e) => set({ show_driver_phone: e.target.checked })} /> Show the driver’s phone number to customers on the tracking page</label>
         <label className="set-check"><input type="checkbox" checked={form.sound} onChange={(e) => set({ sound: e.target.checked })} /> Play sounds on the board for new and late orders</label>
+      </Section>
+
+      <Section id="custom" title="Custom order fields" intro="Extra questions on every order — for example a gate code or a spice level. They appear on Add order and on the order card. Tick “Show to driver” to send one to the driver app. Orders that arrive from other channels do not have to answer required fields." {...sec('custom')}>
+        {form.custom_fields.length === 0 && <p className="muted">No custom fields yet. The Notes box on Add order is always there.</p>}
+        {form.custom_fields.map((f, i) => {
+          const upd = (patch) => set({ custom_fields: form.custom_fields.map((x) => (x.key === f.key ? { ...x, ...patch } : x)) });
+          return (
+            <div className="set-cf" key={f.key}>
+              <div className="set-grid">
+                <div className="set-field"><label htmlFor={`cf-l-${f.key}`}>Label</label><input id={`cf-l-${f.key}`} value={f.label} maxLength={40} onChange={(e) => upd({ label: e.target.value })} placeholder="e.g. Gate code" /></div>
+                <div className="set-field"><label htmlFor={`cf-t-${f.key}`}>Type</label>
+                  <select id={`cf-t-${f.key}`} value={f.type} onChange={(e) => upd({ type: e.target.value, ...(e.target.value === 'checkbox' ? { required: false } : {}) })}>{FIELD_TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+                </div>
+              </div>
+              {f.type === 'choice' && <div className="set-field"><label htmlFor={`cf-c-${f.key}`}>Choices (separated by commas)</label><input id={`cf-c-${f.key}`} value={f.choices} onChange={(e) => upd({ choices: e.target.value })} placeholder="Mild, Hot, Extra hot" /></div>}
+              <div className="row">
+                <label className="set-check"><input type="checkbox" checked={f.required} disabled={f.type === 'checkbox'} onChange={(e) => upd({ required: e.target.checked })} /> Required on Add order</label>
+                <label className="set-check"><input type="checkbox" checked={f.show_on_driver} onChange={(e) => upd({ show_on_driver: e.target.checked })} /> Show to driver</label>
+                <span style={{ flex: 1 }} />
+                <button type="button" aria-label={`Remove field ${i + 1}`} onClick={() => set({ custom_fields: form.custom_fields.filter((x) => x.key !== f.key) })}>Remove</button>
+              </div>
+            </div>
+          );
+        })}
+        <button type="button" disabled={form.custom_fields.length >= 20} onClick={() => set({ custom_fields: [...form.custom_fields, { key: ++bandKey, fieldKey: '', label: '', type: 'text', required: false, show_on_driver: false, choices: '' }] })}>+ Add a field</button>
+      </Section>
+
+      <Section id="trails" title="Driver GPS history" intro="Every driver's position is saved while they are clocked in, so you can replay any past route from the Drivers page." {...sec('trails')}>
+        <div className="set-grid">
+          <Num id="g-days" label="Keep GPS history for" value={form.trail_retention_days} onChange={(v) => set({ trail_retention_days: v })} suffix="days" step="1" help="Older points are deleted automatically. 0 keeps them for ever." />
+        </div>
       </Section>
 
       <Integrations />

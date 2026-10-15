@@ -10,6 +10,8 @@ import Icon from '../components/Icon.jsx';
 import { useToasts } from '../components/Toasts.jsx';
 import OrderCard from '../board/OrderCard.jsx';
 import TimelineModal from '../board/TimelineModal.jsx';
+import FlagModal from '../components/FlagModal.jsx';
+import IncidentModal from '../components/IncidentModal.jsx';
 import IngestFailures from '../board/IngestFailures.jsx';
 import { useLateOrders, useSecond } from '../board/clock.js';
 import { clock, printProblem, shortNo, stateLabel } from '../board/format.js';
@@ -78,6 +80,8 @@ export default function Board() {
   const [movingId, setMovingId] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [timelineId, setTimelineId] = useState(null);
+  const [flagFor, setFlagFor] = useState(null);
+  const [incidentFor, setIncidentFor] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [mapOpen, setMapOpen] = useState(() => localStorage.getItem('tad.brd.map') !== '0');
   const [topBusy, setTopBusy] = useState('');
@@ -165,6 +169,8 @@ export default function Board() {
       case 'requeue': return call(key, () => post(`/api/orders/${order.id}/requeue`), `${order.number} is back in the Ready queue`);
       case 'remove': return ask({ title: `Remove ${order.number}`, body: 'The order leaves the board for good.', field: { label: 'Reason', required: false, placeholder: 'e.g. Customer refunded' }, confirmText: 'Remove', danger: true, onSubmit: (reason) => call(key, () => post(`/api/orders/${order.id}/remove`, reason ? { reason } : {}), `${order.number} removed`) });
       case 'timeline': return setTimelineId(order.id);
+      case 'flag': return setFlagFor(order);
+      case 'incident': return setIncidentFor(order);
       case 'label': {
         window.open(`/api/orders/${order.id}/label`, '_blank', 'noopener');
         return withBusy(key, async () => {
@@ -364,6 +370,8 @@ export default function Board() {
 
       {dialog && <AskDialog {...dialog} onClose={() => setDialog(null)} />}
       {timelineId != null && <TimelineModal orderId={timelineId} onClose={() => setTimelineId(null)} />}
+      {flagFor && <FlagModal initial={{ phone: flagFor.customer_phone || '', line1: flagFor.address_line || '', postcode: flagFor.postcode || '', kind: flagFor.customer_phone ? 'phone' : 'address' }} onClose={() => setFlagFor(null)} onDone={() => { toast('Saved. See it under Flags.', 'ok'); refresh(); }} />}
+      {incidentFor && <IncidentModal orderId={incidentFor.id} orderNumber={incidentFor.number} driverId={incidentFor.driver_id || ''} drivers={[...(board.drivers?.available || []), ...(board.drivers?.busy || []), ...(board.drivers?.offline || [])].map((d) => ({ id: d.driver_id, name: d.name }))} onClose={() => setIncidentFor(null)} onDone={() => { toast('Incident saved', 'ok'); refresh(); }} />}
       {node}
     </div>
   );
