@@ -11,6 +11,7 @@ import { AppError, text } from '../lib/util.js';
 import { normalisePostcode, normalisePhone, haversineKm } from '../lib/geo.js';
 import { sign } from '../lib/tokens.js';
 import { localDate } from '../lib/tz.js';
+import { cleanCustom, describeCustom } from '../lib/customfields.js';
 
 export const STATES = ['scheduled', 'new', 'accepted', 'preparing', 'ready', 'assigned', 'out', 'delivered', 'collected', 'failed', 'removed', 'cancelled'];
 export const OPEN_STATES = ['new', 'accepted', 'preparing', 'ready', 'assigned', 'out'];
@@ -31,7 +32,7 @@ export function createOrders(ctx) {
   const { db, now, settings, bus, audit, postcodes, fleetbase, logger = console } = ctx;
   const iso = () => now().toISOString();
 
-  const hydrate = (r) => (r ? { ...r, items: JSON.parse(r.items_json), paid: Boolean(r.paid) } : null);
+  const hydrate = (r) => (r ? { ...r, items: JSON.parse(r.items_json), paid: Boolean(r.paid), custom: r.custom_json ? JSON.parse(r.custom_json) : {} } : null);
   const byId = (id) => hydrate(q.get(db, 'SELECT * FROM orders WHERE id = ?', id));
   const byNumber = (n) => hydrate(q.get(db, 'SELECT * FROM orders WHERE number = ?', n));
   const need = (id) => { const o = byId(id); if (!o) throw new AppError('That order does not exist', 404, 'not_found'); return o; };
@@ -94,25 +95,47 @@ export function createOrders(ctx) {
       km = checkDeliverable({ lat, lng, outcode: pc.outcode, siteId });
       if (!text(a.line1, 160, 'address', { required: true })) throw new AppError('Address is needed');
     }
+    const custom = cleanCustom(settings.get('custom_fields'), input.custom, { enforceRequired: source === 'manual' });
+    const warnings = checkFlags({ source, override: input.override_block === true, phone, line1: a.line1, postcode: pc?.postcode, actor });
     const fee = input.delivery_fee_pence ?? (fulfilment === 'delivery' && km != null ? deliveryFee(km) : null);
     const number = nextNumber();
     const scheduled = input.scheduled_for ? new Date(input.scheduled_for).toISOString() : null;
     const state = scheduled && Date.parse(scheduled) > now().getTime() ? 'scheduled' : 'new';
     const r = q.run(db, `INSERT INTO orders(number, site_id, source, external_id, fulfilment, state, customer_name, customer_phone, customer_email,
-        address_line, postcode, outcode, lat, lng, items_json, item_count, notes, total_pence, delivery_fee_pence, paid, scheduled_for, created_at, track_token, hub_order_id)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        address_line, postcode, outcode, lat, lng, items_json, item_count, notes, total_pence, delivery_fee_pence, paid, scheduled_for, created_at, track_token, hub_order_id, custom_json)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       number, siteId, source, externalId, fulfilment, state, text(customer.name, 80, 'customer name'), phone, customer.email ? String(customer.email).toLowerCase().slice(0, 120) : null,
       fulfilment === 'delivery' ? text(a.line1, 160, 'address') : null, pc?.postcode ?? null, pc?.outcode ?? null, lat, lng,
-      JSON.stringify(items), items.reduce((n, i) => n + i.qty, 0), text(input.notes, 500, 'notes'), input.total_pence ?? null, fee, input.paid === false ? 0 : 1, scheduled, iso(), sign(ctx.trackSecret, number), input.hub_order_id ?? null);
+      JSON.stringify(items), items.reduce((n, i) => n + i.qty, 0), text(input.notes, 500, 'notes'), input.total_pence ?? null, fee, input.paid === false ? 0 : 1, scheduled, iso(), sign(ctx.trackSecret, number), input.hub_order_id ?? null, Object.keys(custom).length ? JSON.stringify(custom) : null);
     const id = Number(r.lastInsertRowid);
     event(id, 'created', { source, state });
     audit.log(actor, 'order.create', 'order', id, { number, source });
+    for (const w of warnings) { event(id, w.override ? 'block_overridden' : 'flag_warning', { level: w.level, reasons: w.reasons }); audit.log(actor, w.override ? 'order.block_overridden' : 'order.flag_warning', 'order', id, { number, level: w.level, reasons: w.reasons }); }
     if (fulfilment === 'delivery' && phone && pc) rememberAddress({ phone, postcode: pc.postcode, name: customer.name, line1: a.line1, lat, lng });
     const order = byId(id);
     bus.emit('order', { order, from: null, to: state });
     syncToFleetbase(order).catch((e) => logger.warn?.(`Fleetbase sync for ${number} will retry: ${e.message}`));
-    return { order, duplicate: false };
+    return { order, duplicate: false, warnings: warnings.map((w) => ({ level: w.level, reasons: w.reasons, override: Boolean(w.override) })) };
   }
+
+  /**
+   * Flagged customers/addresses only warn. Blocked ones refuse a new order from our own site or the admin's Add order
+   * (the admin can override a manual one). Orders that arrive already paid on another platform cannot be refused, so they
+   * are taken and shouted about on the board instead.
+   */
+  function checkFlags({ source, override, phone, line1, postcode, actor }) {
+    const m = ctx.flags.check({ phone, line1, postcode });
+    if (!m.level) return [];
+    const reasons = m.matches.map((x) => x.reason);
+    if (m.level === 'blocked' && ['manual', 'own-site'].includes(source)) {
+      if (source === 'manual' && override) { audit.log(actor, 'flag.override', 'customer_flag', m.matches[0].id, { phone, line1, postcode }); return [{ level: 'blocked', reasons, override: true }]; }
+      throw new AppError(`This ${m.matches[0].kind === 'phone' ? 'customer' : 'address'} is blocked: ${reasons.join('; ')}`, 409, 'customer_blocked');
+    }
+    return [{ level: m.level, reasons }];
+  }
+
+  /** The fields (with their labels) this order has answers for. */
+  const customView = (o) => describeCustom(settings.get('custom_fields'), o.custom);
 
   /** The self-building address book: one row per (phone, postcode), refreshed on every order. */
   function rememberAddress({ phone, postcode, name, line1, lat, lng }) {
@@ -152,7 +175,7 @@ export function createOrders(ctx) {
     const fb = await fleetbase.createOrder({
       pickup: pickup.id, dropoff: drop.id,
       customer: order.customer_name ? Object.fromEntries(Object.entries({ name: order.customer_name, phone: order.customer_phone, email: order.customer_email }).filter(([, v]) => v)) : undefined,
-      notes: order.notes, meta: { tad_number: order.number, tad_id: order.id, source: order.source, items: order.items, postcode: order.postcode },
+      notes: order.notes, meta: { tad_number: order.number, tad_id: order.id, source: order.source, items: order.items, postcode: order.postcode, custom: customView(order).map(({ label, value }) => ({ label, value })) },
     });
     q.run(db, 'UPDATE orders SET fleetbase_order_id = ?, fleetbase_tracking = ?, fb_dropoff_place = ?, fb_customer = ? WHERE id = ? AND fleetbase_order_id IS NULL', fb.id, fb.tracking_number?.tracking_number ?? null, drop.id ?? null, fb.customer?.id ?? null, order.id);
     event(order.id, 'fleetbase_synced', { id: fb.id });
@@ -210,5 +233,5 @@ export function createOrders(ctx) {
 
   const timeline = (id) => q.all(db, 'SELECT at, type, detail FROM order_events WHERE order_id = ? ORDER BY id', id).map((e) => ({ ...e, detail: e.detail ? JSON.parse(e.detail) : null }));
 
-  return { create, byId, byNumber, need, transition, list, timeline, findAddresses, rememberAddress, syncToFleetbase, retryFleetbaseSync, releaseScheduled, checkDeliverable, deliveryFee, event };
+  return { create, customView, byId, byNumber, need, transition, list, timeline, findAddresses, rememberAddress, syncToFleetbase, retryFleetbaseSync, releaseScheduled, checkDeliverable, deliveryFee, event };
 }

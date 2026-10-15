@@ -80,8 +80,9 @@ export function createHubSync(ctx) {
     if (!p) throw new AppError('A phone number is needed to find the person');
     const rows = q.all(db, 'SELECT id, fb_dropoff_place, fb_customer FROM orders WHERE customer_phone = ?', p);
     // the person, the address, the coordinates and the live tracking link go; the order record (times, district, items) stays
-    const r = q.run(db, "UPDATE orders SET customer_name = NULL, customer_phone = NULL, customer_email = NULL, address_line = '(erased)', postcode = NULL, lat = NULL, lng = NULL, notes = NULL, track_token = NULL, fb_dropoff_place = NULL, fb_customer = NULL WHERE customer_phone = ?", p);
+    const r = q.run(db, "UPDATE orders SET customer_name = NULL, customer_phone = NULL, customer_email = NULL, address_line = '(erased)', postcode = NULL, lat = NULL, lng = NULL, notes = NULL, track_token = NULL, fb_dropoff_place = NULL, fb_customer = NULL, custom_json = NULL WHERE customer_phone = ?", p);
     const a = q.run(db, 'DELETE FROM customer_addresses WHERE phone_norm = ?', p);
+    q.run(db, "UPDATE customer_flags SET label = '(erased)', value_key = '(erased)', reason = '(erased)', cleared_at = COALESCE(cleared_at, ?), cleared_by = COALESCE(cleared_by, 'privacy erase') WHERE kind = 'phone' AND value_key = ?", now().toISOString(), p);
     // Fleetbase's own copies (place + contact), best effort
     for (const o of rows) {
       if (o.fb_dropoff_place) Promise.resolve().then(() => ctx.fleetbase.deletePlace(o.fb_dropoff_place)).catch((e) => logger.warn?.(`Fleetbase place erase: ${e.message}`));

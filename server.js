@@ -19,6 +19,7 @@ const timer = setInterval(async () => {
   busy = true;
   try {
     await ctx.fbsync.reconcile();
+    await ctx.trails.sample();
     await ctx.batcher.tick({ skipIfBusy: true });
     await ctx.hubsync.pushPending();
     await ctx.hubsync.pollEvents();

@@ -1,6 +1,7 @@
 /** Analytics: demand heatmap data, driver performance (no money), end-of-day report, audit log. Plain SQL over our order timestamps. */
 import Supercluster from 'supercluster';
 import { q } from '../lib/db.js';
+import { csvCell } from '../lib/util.js';
 import { localParts, dayRangeUtc } from '../lib/tz.js';
 
 const mins = (a, b) => (a && b ? (Date.parse(b) - Date.parse(a)) / 60000 : null);
@@ -83,7 +84,6 @@ export function createAnalytics(ctx) {
     };
   }
 
-  const csvCell = (v) => { let s = v == null ? '' : String(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   /** Orders as CSV (no money columns beyond the order total the customer already paid online). */
   function ordersCsv({ from, to } = {}) {
     const r = range(from, to);

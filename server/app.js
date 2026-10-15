@@ -8,6 +8,8 @@ import { parseQr } from '../services/labels.js';
 import { safeEqual } from '../lib/tokens.js';
 import { localDate } from '../lib/tz.js';
 import { normalisePostcode } from '../lib/geo.js';
+import { driverCustom } from '../lib/customfields.js';
+import { INCIDENT_TYPES } from '../services/incidents.js';
 
 const json = express.json({ limit: '4mb' });
 const raw = express.raw({ type: '*/*', limit: '2mb' });
@@ -119,8 +121,8 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   });
 
   admin.get('/orders', (req, res) => res.json({ orders: orders.list({ states: req.query.states ? String(req.query.states).split(',') : undefined, since: req.query.since }) }));
-  admin.post('/orders', async (req, res) => { const r = await ingest.manual(req.body || {}); res.status(r.duplicate ? 200 : 201).json({ order: r.order }); });
-  admin.get('/orders/:id', (req, res) => { const id = intParam(req.params.id); res.json({ order: orders.need(id), timeline: orders.timeline(id) }); });
+  admin.post('/orders', async (req, res) => { const r = await ingest.manual(req.body || {}); res.status(r.duplicate ? 200 : 201).json({ order: r.order, warnings: r.warnings || [] }); });
+  admin.get('/orders/:id', (req, res) => { const id = intParam(req.params.id); const o = orders.need(id); res.json({ order: o, custom: orders.customView(o), timeline: orders.timeline(id) }); });
   admin.post('/orders/:id/transition', async (req, res) => {
     const id = intParam(req.params.id), { to, reason } = req.body || {};
     if (to === 'delivered') return res.json({ order: await batcher.deliver(id, { actor: 'admin' }) });
@@ -173,6 +175,27 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const kind = String(req.query.kind || 'out');
     res.json({ link: notify.waLink(o.customer_phone, `Texas After Dark — order ${o.number}: ${req.query.text || `follow it here ${notify.trackUrl(o)}`}`), kind });
   });
+
+  /* driver GPS trails (saved), flags, incidents */
+  admin.get('/drivers/:id/runs', (req, res) => res.json({ runs: ctx.trails.runs(String(req.params.id)), retention_days: settings.get('trail_retention_days'), ...ctx.trails.stats() }));
+  admin.get('/drivers/:id/trail', (req, res) => {
+    const batchId = req.query.batch_id ? intParam(req.query.batch_id, 'batch_id') : null;
+    res.json(ctx.trails.trail(String(req.params.id), { batchId, from: req.query.from, to: req.query.to }));
+  });
+
+  admin.get('/flags', (req, res) => res.json({ flags: ctx.flags.list({ includeCleared: req.query.all === '1' }) }));
+  admin.post('/flags', (req, res) => res.status(201).json({ flag: ctx.flags.add({ ...(req.body || {}), actor: 'admin' }) }));
+  admin.post('/flags/:id/clear', (req, res) => res.json({ flag: ctx.flags.clear(intParam(req.params.id)) }));
+  admin.get('/flags/check', (req, res) => res.json(ctx.flags.check({ phone: req.query.phone, line1: req.query.line1, postcode: req.query.postcode })));
+
+  admin.get('/incidents', (req, res) => res.json({ incidents: ctx.incidents.list(incidentFilter(req)), types: INCIDENT_TYPES }));
+  admin.get('/incidents.csv', (req, res) => res.type('text/csv').set('Content-Disposition', 'attachment; filename="tad-incidents.csv"').send(ctx.incidents.csv(incidentFilter(req))));
+  admin.post('/incidents', (req, res) => {
+    const b = req.body || {};
+    const photo = b.photo ? savePhoto(b.photo, 'incident') : null;
+    res.status(201).json({ incident: ctx.incidents.create({ type: b.type, note: b.note, photo, orderId: b.order_id != null && b.order_id !== '' ? intParam(b.order_id, 'order_id') : null, driverId: b.driver_id || null, reporter: 'admin' }) });
+  });
+  admin.post('/incidents/:id/resolve', (req, res) => res.json({ incident: ctx.incidents.resolve(intParam(req.params.id), { note: req.body?.note }) }));
 
   admin.get('/analytics/demand', (req, res) => res.json(analytics.demand({ from: req.query.from, to: req.query.to })));
   admin.get('/analytics/drivers', (req, res) => res.json({ drivers: analytics.driverPerformance({ from: req.query.from, to: req.query.to }) }));
@@ -240,12 +263,27 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const photo = req.body?.photo ? savePhoto(req.body.photo, id) : null;
     res.json({ order: await batcher.fail(id, { reason: req.body?.reason, photo, actor: `driver:${req.driverId}` }) });
   });
+  driver.post('/location', (req, res) => {
+    const pts = Array.isArray(req.body?.points) ? req.body.points.slice(0, 200) : [req.body || {}];       // a phone that was offline sends its queued points together
+    let kept = 0;
+    for (const p of pts) if (ctx.trails.record(req.driverId, p.lat, p.lng, { at: p.at })) kept++;
+    res.json({ ok: true, kept });
+  });
+  driver.post('/incidents', (req, res) => {
+    const b = req.body || {};
+    let orderId = null;
+    if (b.order_id != null && b.order_id !== '') { orderId = intParam(b.order_id, 'order_id'); mine(req.driverId, orderId); }
+    const photo = b.photo ? savePhoto(b.photo, 'incident') : null;
+    res.status(201).json({ incident: ctx.incidents.create({ type: b.type, note: b.note, photo, orderId, driverId: req.driverId, reporter: `driver:${req.driverId}` }) });
+  });
+  driver.get('/incident-types', (req, res) => res.json({ types: INCIDENT_TYPES }));
   driver.get('/notifications', (req, res) => res.json({ messages: notify.inbox(req.driverId).map((m) => ({ id: m.id, ...m.payload, at: m.created_at })) }));
   driver.post('/notifications/read', (req, res) => { notify.markRead(req.driverId, (req.body?.ids || []).map(Number).filter(Number.isInteger)); res.json({ ok: true }); });
   driver.post('/push/subscribe', (req, res) => { if (!req.body?.endpoint) fail('A push subscription is needed'); notify.subscribe('driver', req.driverId, req.body); res.json({ ok: true }); });
   app.use('/driver', driver);
 
   /* ------------------------------------------------------------- helpers */
+  const incidentFilter = (req) => ({ from: req.query.from, to: req.query.to, status: req.query.status, type: req.query.type, orderId: req.query.order_id ? intParam(req.query.order_id, 'order_id') : undefined, driverId: req.query.driver_id });
   function mine(driverId, orderId) { const o = orders.need(orderId); if (o.driver_id !== driverId) fail('That order is not on your run', 403, 'not_yours'); return o; }
 
   function driverRun(driverId) {
@@ -254,15 +292,15 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const os = q.all(ctx.db, "SELECT id FROM orders WHERE batch_id = ? AND state IN ('assigned','out','delivered','failed') ORDER BY stop_seq", b.id).map((r) => orders.byId(r.id));
     return { batch: { id: b.id, status: b.status, return_eta_at: b.return_eta_at }, orders: os.map(publicOrder) };
   }
-  const publicOrder = (o) => ({ id: o.id, number: o.number, state: o.state, stop_seq: o.stop_seq, name: o.customer_name, phone: o.customer_phone, address: o.address_line, postcode: o.postcode, lat: o.lat, lng: o.lng, notes: o.notes, items: o.items, picked_at: o.picked_at, fleetbase_order_id: o.fleetbase_order_id });
+  const publicOrder = (o) => ({ id: o.id, number: o.number, state: o.state, stop_seq: o.stop_seq, name: o.customer_name, phone: o.customer_phone, address: o.address_line, postcode: o.postcode, lat: o.lat, lng: o.lng, notes: o.notes, items: o.items, picked_at: o.picked_at, fleetbase_order_id: o.fleetbase_order_id, custom: driverCustom(settings.get('custom_fields'), o.custom) });
 
-  function savePhoto(dataUrl, orderId) {
+  function savePhoto(dataUrl, tag) {
     const m = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl));
     if (!m) fail('The photo must be a PNG, JPEG or WebP image');
     const buf = Buffer.from(m[2], 'base64');
     if (buf.length > 3 * 1024 * 1024) fail('The photo is too big (3 MB at most)');
     fs.mkdirSync(uploadDir, { recursive: true });
-    const name = `failed-${orderId}-${Date.now()}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+    const name = `${tag === 'incident' ? 'incident' : `failed-${tag}`}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
     fs.writeFileSync(path.join(uploadDir, name), buf);
     return name;
   }
@@ -280,8 +318,12 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const av = await shifts.availability({ requireOnline: false }).catch(() => ({ available: [], busy: [], offline: [] }));
     const batches = q.all(ctx.db, "SELECT * FROM batches WHERE status IN ('assigned','planned','out') ORDER BY id").map((b) => ({ ...b, route_json: undefined, order_ids: q.all(ctx.db, 'SELECT id FROM orders WHERE batch_id = ? ORDER BY stop_seq', b.id).map((r) => r.id) }));
     const { proposals, engine } = await batcher.plan().catch(() => ({ proposals: [], engine: 'none' }));
+    const flagged = ctx.flags.forOrders([...open, ...recent]);
+    const dress = (o) => ({ ...withSla(s)(o), flag: flagged.get(o.id) ?? null, custom_view: orders.customView(o) });
+    const incidents_open = q.get(ctx.db, "SELECT COUNT(*) AS n FROM incidents WHERE status = 'open'").n;
     return {
-      now: now().toISOString(), ingest_failures: ingest.failures().length, settings: s, orders: open.map(withSla(s)), recent: recent.map(withSla(s)), drivers: av, batches, engine,
+      incidents_open,
+      now: now().toISOString(), ingest_failures: ingest.failures().length, settings: s, orders: open.map(dress), recent: recent.map(dress), drivers: av, batches, engine,
       preview: proposals.map((p) => ({ order_ids: p.orders.map((o) => o.id), ripe: p.ripe, full: p.full, waits_seconds: p.waits_seconds })),
     };
   }
@@ -306,7 +348,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     app.use(express.static(webDir, { index: 'index.html', maxAge: '1h' }));
     app.get('/t/:token', (req, res) => res.sendFile(path.join(webDir, 'track.html'), { dotfiles: 'allow' }));
     // client-side routes of the admin app: a reload on /add, /drivers… must still load the app
-    app.get(['/add', '/scan', '/drivers', '/calendar', '/analytics', '/audit', '/settings'], (req, res) => res.sendFile(path.join(webDir, 'index.html'), { dotfiles: 'allow' }));
+    app.get(['/add', '/scan', '/drivers', '/calendar', '/analytics', '/audit', '/settings', '/flags', '/incidents'], (req, res) => res.sendFile(path.join(webDir, 'index.html'), { dotfiles: 'allow' }));
   } else {
     app.get('/', (req, res) => res.type('text').send('TAD delivery platform API is running. Build the web app with: npm run web:build'));
   }
