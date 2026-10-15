@@ -1,0 +1,14 @@
+node_modules/
+.vendor/
+.data/
+.tmp-test/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+docker/fleetbase/.env
+docker/fleetbase/api.env
+docker/fleetbase/console.config.json
+docker/fleetbase/.admin-password

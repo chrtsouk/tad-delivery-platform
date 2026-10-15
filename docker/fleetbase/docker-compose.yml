@@ -1,0 +1,90 @@
+# Fleetbase, run UNMODIFIED from its official prebuilt images (AGPL-3.0, https://github.com/fleetbase/fleetbase).
+# Service layout follows upstream docker-compose.yml. Generated secrets live in ./.env (gitignored) — see scripts/fleetbase-up.sh.
+name: tadfb
+services:
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 5s, retries: 5 }
+
+  database:
+    image: mysql:8.0
+    restart: unless-stopped
+    command: ["mysqld", "--skip-log-bin"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: fleetbase
+    volumes:
+      - dbdata:/var/lib/mysql
+    healthcheck: { test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"], interval: 10s, timeout: 5s, retries: 12 }
+
+  socket:
+    image: fleetbase/fleetbase-socket:latest
+    restart: unless-stopped
+    ports: ["38000:8000"]
+    environment:
+      SOCKETCLUSTER_AUTH_ENABLED: "false"
+      SOCKETCLUSTER_OPTIONS: '{"origins":"http://localhost:*"}'
+
+  application: &api
+    image: fleetbase/fleetbase-api:latest
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    volumes:
+      - ./api.env:/fleetbase/api/.env
+      - apistorage:/fleetbase/api/storage/app
+    environment: &apienv
+      ENVIRONMENT: development
+      APP_KEY: ${APP_KEY}
+      APP_URL: http://localhost:8000
+      CONSOLE_HOST: http://localhost:4200
+      DATABASE_URL: mysql://root:${DB_ROOT_PASSWORD}@database/fleetbase
+      QUEUE_CONNECTION: redis
+      CACHE_DRIVER: redis
+      CACHE_PATH: /fleetbase/api/storage/framework/cache
+      CACHE_URL: tcp://cache
+      REDIS_URL: tcp://cache
+      SESSION_DOMAIN: localhost
+      BROADCAST_DRIVER: socketcluster
+      MAIL_MAILER: log
+      MAIL_FROM_NAME: Texas After Dark
+      APP_NAME: "Texas After Dark"
+      LOG_CHANNEL: daily
+      REGISTRY_HOST: https://registry.fleetbase.io
+      REGISTRY_PREINSTALLED_EXTENSIONS: "true"
+      OSRM_HOST: ${OSRM_HOST:-http://host.docker.internal:5001}
+      SOCKETCLUSTER_AUTH_ENABLED: "false"
+      SOCKETCLUSTER_PUBLISH_URL: http://socket:8001
+      SOCKETCLUSTER_ORIGIN: http://localhost:4200
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: [database, cache, queue, socket]
+
+  queue:
+    image: fleetbase/fleetbase-api:latest
+    command: ["php", "artisan", "queue:work"]
+    restart: unless-stopped
+    volumes:
+      - ./api.env:/fleetbase/api/.env
+    environment: *apienv
+    depends_on: [database, cache]
+
+  scheduler:
+    image: fleetbase/fleetbase-api:latest
+    command: ["go-crond", "--verbose", "root:./crontab"]
+    restart: unless-stopped
+    volumes:
+      - ./api.env:/fleetbase/api/.env
+    environment: *apienv
+    depends_on: [database, cache]
+
+  console:
+    image: fleetbase/fleetbase-console:latest
+    platform: linux/amd64   # upstream publishes no arm64 console image; static nginx, runs fine under emulation
+    restart: unless-stopped
+    ports: ["4200:4200"]
+    volumes:
+      - ./console.config.json:/usr/share/nginx/html/fleetbase.config.json:ro
+
+volumes:
+  dbdata:
+  apistorage:

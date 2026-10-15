@@ -1,0 +1,12 @@
+# Decisions (made autonomously — each says what, why, and how to change it)
+
+1. **Fleetbase runs unmodified from its official prebuilt Docker images** (`docker/fleetbase/docker-compose.yml`, compose project `tadfb`). Why: spec says never fork its core. The console image has no arm64 build, so it runs as `linux/amd64` (static nginx; fine under emulation). Change: edit the compose file / `scripts/fleetbase-up.sh`.
+2. **Our code is Node 22+/24 with the built-in `node:sqlite` and `node:test`** — no native modules, no extra DB server. One SQLite file (`.data/tad.sqlite`) holds our own tables (orders mirror, batches, driver_shifts, address book, audit log). Why: zero install, nothing to compile, easy backups. Change: `lib/db.js`.
+3. **One process, many services.** Every service is a module with its own factory (`services/*.js`) wired together in `lib/context.js` and mounted on one Express server (`server.js`). Each can be pulled out into its own process later because they only talk through `ctx`.
+4. **Our own order state machine lives in SQLite; Fleetbase gets the order at ingest and the driver assignment + dispatch at batch time.** Fleetbase has no "Ready" status, and the owner wants Accept/Ready on the board. Fleetbase stays the system of record for drivers, live map, proof of delivery and tracking numbers.
+5. **Places are created first, then referenced by id** when creating Fleetbase orders (nested pickup/dropoff objects lose their address fields in the current Fleetbase API — verified live).
+6. **Order type `transport`** is used for deliveries (Fleetbase's default config); collection (pick-up) orders never reach Fleetbase.
+7. **VROOM is our own instance** (vroom-express); if it is unreachable the batcher falls back to a local nearest-neighbour sequencer and flags the run, so the shop never stops.
+8. **Driver authentication to our platform** is a per-driver bearer token (issued by the admin, stored as a SHA-256 hash). Fleetbase keeps its own driver login for the Navigator app.
+9. **Docker clean-up is scoped to our own compose project** (`docker compose -p tadfb down -v`, `docker image prune -f` for dangling layers only). The spec's `docker volume prune -f` is NOT used because it would delete the owner's other, unrelated Docker volumes (WordPress, MariaDB, etc.) that exist on this MacBook.
+10. **Tests use only in-memory SQLite and in-process fakes** (no temp directories at all); the sweeper still runs at the start and end of `npm test`.
