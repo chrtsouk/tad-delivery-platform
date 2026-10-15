@@ -1,0 +1,36 @@
+The delivery routes the hub served under /api/v1 before they moved out (reference; they become this project's own API):
+
+  // Dispatch: a website or ordering system makes the delivery for an order and shows the customer their tracking link.
+  const deliveryView = (d) => ({
+    id: d.id, status: d.status, items: d.items, area: d.area, order_number: d.order_number, driver: d.driver_name ? d.driver_name.split(' ')[0] : null,
+    placed_at: d.placed_at, promised_at: d.promised_at, out_at: d.out_at, delivered_at: d.delivered_at,
+  });
+  r.get('/deliveries', guarded('dispatch:read', (req, site) => {
+    const status = req.query.status ? String(req.query.status) : null;
+    if (status && !dispatch.STATUSES.includes(status)) throw new AppError(`status is one of ${dispatch.STATUSES.join(', ')}`, 400);
+    const b = dispatch.board({ site_id: site });
+    const all = [...b.waiting, ...b.assigned, ...b.out, ...b.failed, ...b.closed_tonight];
+    return { deliveries: all.filter((d) => !status || d.status === status).map(deliveryView) };
+  }));
+  r.get('/deliveries/:id', guarded('dispatch:read', (req, site) => {
+    const d = dispatch.get(req.params.id);
+    if (d.site_id !== site) throw new AppError('That delivery belongs to another site', 404);
+    // the tracking link opens the customer's page (live place, messages): only a key that may make deliveries is given it
+    return req.apiKey.scopeSet.has('dispatch:write') ? { ...deliveryView(d), tracking_path: dispatch.trackingPath(d.id) } : deliveryView(d);
+  }));
+  r.get('/drivers', guarded('dispatch:read', () => ({
+    drivers: dispatch.drivers({ includeInactive: false }).map((d) => ({ id: d.id, name: d.name.split(' ')[0], state: d.state, room: d.room })),
+  })));
+  r.post('/deliveries', guarded('dispatch:write', (req, site) => {
+    const b = req.body || {};
+    let kitchenOrderId = b.kitchen_order_id;
+    if (!kitchenOrderId && b.external_ref) {
+      const o = db.get('SELECT id FROM kitchen_orders WHERE site_id = ? AND source = ? AND external_ref = ? AND deleted_at IS NULL',
+        [site, String(b.source || 'api'), String(b.external_ref)]);
+      if (!o) throw new AppError('No order with that source and external_ref is on the kitchen pass. Send the order first.', 404);
+      kitchenOrderId = o.id;
+    }
+    const d = dispatch.create({ ...b, kitchen_order_id: kitchenOrderId, site_id: site }, { user: `api:${req.apiKey.name}` });
+    return { ok: true, id: d.id, status: d.status, duplicate: !!d.duplicate, tracking_path: dispatch.trackingPath(d.id) };
+  }));
+

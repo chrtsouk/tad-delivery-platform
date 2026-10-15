@@ -1,0 +1,33 @@
+The office (dispatcher) routes the hub served under /api before they moved out (reference):
+
+  // Deliveries: who is going where. Customers' addresses and phones are personal data, so each route checks the site and the role.
+  const drop = (req) => {
+    const d = dispatch.get(req.params.id);
+    if (!group.canSeeSite(req.user, d.site_id)) throw new AppError(`${req.user.name} does not work at that site`, 403);
+    return d;
+  };
+  r.get('/dispatch', route('dispatch', (req) => dispatch.board({ site_id: str(req.query.site_id) || undefined })));
+  r.get('/dispatch/suggest', route('dispatch', (req) => dispatch.suggest({ site_id: str(req.query.site_id) || undefined })));
+  r.post('/dispatch/deliveries', route('dispatch', (req) => dispatch.create(req.body, { user: req.user.name })));
+  r.post('/dispatch/assign', route('dispatch', (req) => {
+    for (const id of req.body?.ids || []) drop({ ...req, params: { id } });
+    return dispatch.assign(str(req.body?.driver_id), req.body?.ids, { allow_over: bool(req.body?.allow_over), user: req.user.name });
+  }));
+  r.post('/dispatch/drivers/:id/out', route('dispatch', (req) => {
+    // every drop that would leave must be at a site this person works at
+    const ids = req.body?.ids && req.body.ids.length ? req.body.ids : dispatch.loadedIds(req.params.id);
+    for (const id of ids) drop({ ...req, params: { id } });
+    return dispatch.sendOut(req.params.id, ids, { user: req.user.name });
+  }));
+  r.post('/dispatch/deliveries/:id/requeue', route('dispatch', (req) => { drop(req); return dispatch.requeue(req.params.id, { user: req.user.name }); }));
+  r.post('/dispatch/deliveries/:id/unassign', route('dispatch', (req) => { drop(req); return dispatch.unassign(req.params.id, { user: req.user.name }); }));
+  r.post('/dispatch/deliveries/:id/delivered', route('dispatch', (req) => { drop(req); return dispatch.markDelivered(req.params.id, { user: req.user.name }); }));
+  r.post('/dispatch/deliveries/:id/failed', route('dispatch', (req) => { drop(req); return dispatch.markFailed(req.params.id, { reason: str(req.body?.reason), user: req.user.name }); }));
+  r.post('/dispatch/deliveries/:id/cancel', route('dispatch', (req) => { drop(req); return dispatch.cancel(req.params.id, { reason: str(req.body?.reason), user: req.user.name }); }));
+  r.get('/dispatch/deliveries/:id/messages', route('dispatch', (req) => { drop(req); return { messages: dispatch.messages(req.params.id, { markRead: true }), tracking_path: dispatch.trackingPath(req.params.id) }; }));
+  r.post('/dispatch/deliveries/:id/messages', route('dispatch', (req) => { drop(req); return dispatch.addMessage(req.params.id, { from_kind: 'office', from_name: req.user.name, body: req.body?.body, audience: str(req.body?.audience) }); }));
+  r.get('/drivers', route('dispatch', () => ({ drivers: dispatch.drivers() })));
+  r.post('/drivers', route('staff', (req) => dispatch.saveDriver(req.body, { user: req.user.name })));
+  r.put('/drivers/:id', route('staff', (req) => dispatch.saveDriver({ ...req.body, id: req.params.id }, { user: req.user.name })));
+  r.post('/drivers/:id/key', route('*', (req) => dispatch.newDriverKey(req.params.id, { user: req.user.name })));
+  r.delete('/drivers/:id/key', route('*', (req) => dispatch.revokeDriverKey(req.params.id, { user: req.user.name })));
