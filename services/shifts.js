@@ -20,10 +20,11 @@ export function createShifts(ctx) {
     } catch (e) { logger.warn?.(`Could not set ${driverId} ${wanted ? 'online' : 'offline'} in Fleetbase: ${e.message}`); }
   }
 
-  async function clockIn(driverId, { zone = null, actor = 'driver' } = {}) {
+  async function clockIn(driverId, { zone = null, siteId = 'main', actor = 'driver' } = {}) {
+    ctx.sites.need(siteId);
     if (open(driverId)) throw new AppError('You are already clocked in', 409, 'already_in');
     const d = await fbDriver(driverId);
-    q.run(db, 'INSERT INTO driver_shifts(driver_id, driver_name, clock_in_at, zone) VALUES(?,?,?,?)', driverId, d.name ?? null, iso(), zone);
+    q.run(db, 'INSERT INTO driver_shifts(driver_id, driver_name, clock_in_at, zone, site_id) VALUES(?,?,?,?,?)', driverId, d.name ?? null, iso(), zone, siteId);
     await ensureOnline(driverId, true);
     audit.log(actor, 'shift.clock_in', 'driver', driverId, { zone });
     ctx.bus.emit('shift', { driverId, clockedIn: true });
@@ -58,7 +59,7 @@ export function createShifts(ctx) {
     for (const s of shifts) {
       const fb = online?.get(s.driver_id);
       const loc = fb?.location?.coordinates;
-      const rec = { driver_id: s.driver_id, name: s.driver_name ?? fb?.name ?? null, zone: s.zone, clock_in_at: s.clock_in_at, lat: loc && (loc[0] || loc[1]) ? loc[1] : null, lng: loc && (loc[0] || loc[1]) ? loc[0] : null };
+      const rec = { driver_id: s.driver_id, site_id: s.site_id, name: s.driver_name ?? fb?.name ?? null, zone: s.zone, clock_in_at: s.clock_in_at, lat: loc && (loc[0] || loc[1]) ? loc[1] : null, lng: loc && (loc[0] || loc[1]) ? loc[0] : null };
       if (online && !fb?.online) { result.offline.push(rec); continue; }
       const run = q.get(db, "SELECT id, status, return_eta_at FROM batches WHERE driver_id = ? AND status IN ('assigned','out') ORDER BY id DESC LIMIT 1", s.driver_id);
       if (run) result.busy.push({ ...rec, batch_id: run.id, batch_status: run.status, return_eta_at: run.return_eta_at });

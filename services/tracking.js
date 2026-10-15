@@ -77,7 +77,7 @@ export function createTracking(ctx) {
       eta_minutes: eta, eta_at: eta != null ? new Date(now().getTime() + eta * 60000).toISOString() : null,
       driver: driver ? { first_name: driver.name, lat: driver.lat, lng: driver.lng, heading: driver.heading, phone: s.show_driver_phone ? driver.phone : null } : null,
       destination: o.lat != null ? { lat: o.lat, lng: o.lng, postcode: o.postcode } : null,
-      store: { name: s.store.name, lat: s.store.lat, lng: s.store.lng, phone: s.store.phone || null },
+      store: ctx.sites.store(o.site_id),
       items: o.items, placed_at: o.created_at, delivered_at: o.delivered_at, can_rate: ['delivered', 'collected'].includes(o.state) && o.rating == null, rating: o.rating,
       push_public_key: ctx.notify.vapidPublicKey,
     };
@@ -94,13 +94,13 @@ export function createTracking(ctx) {
   }
 
   /** For the owner's own ordering site: a quote before the customer pays (deliverable? fee? ETA?). */
-  async function quote({ postcode, lat, lng }) {
+  async function quote({ postcode, lat, lng, site = 'main' }) {
     const { normalisePostcode } = await import('../lib/geo.js');
     const pc = normalisePostcode(postcode);
     let p = lat != null ? { lat, lng } : await ctx.postcodes.lookup(pc.postcode);
     if (!p) throw new AppError(`We could not find ${pc.postcode} on the map`, 422, 'unknown_postcode');
     const s = settings.all();
-    try { const km = orders.checkDeliverable({ lat: p.lat, lng: p.lng, outcode: pc.outcode }); return { deliverable: true, fee_pence: orders.deliveryFee(km), eta_minutes: s.default_eta_minutes, open: s.open, distance_km: Math.round(km * 10) / 10 }; }
+    try { const km = orders.checkDeliverable({ lat: p.lat, lng: p.lng, outcode: pc.outcode, siteId: site }); return { deliverable: true, fee_pence: orders.deliveryFee(km), eta_minutes: s.default_eta_minutes, open: s.open, distance_km: Math.round(km * 10) / 10 }; }
     catch (e) { if (e.code === 'outside_area') return { deliverable: false, reason: e.message, open: s.open }; throw e; }
   }
 

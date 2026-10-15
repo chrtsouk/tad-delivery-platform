@@ -5,6 +5,7 @@ import { AppError, errorHandler } from '../lib/util.js';
 import { q } from '../lib/db.js';
 import { createAuth } from './auth.js';
 import { parseQr } from '../services/labels.js';
+import { safeEqual } from '../lib/tokens.js';
 
 const json = express.json({ limit: '4mb' });
 const raw = express.raw({ type: '*/*', limit: '2mb' });
@@ -49,6 +50,14 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     res.json({ ok: true, changed });
   });
 
+  // Fleetbase developer-console webhook (order.* events): the secret travels in the URL query, set FLEETBASE_WEBHOOK_SECRET
+  app.post('/api/fleetbase/webhook', express.json({ limit: '1mb' }), async (req, res) => {
+    if (!ctx.config.fleetbaseWebhookSecret) throw new AppError('The Fleetbase webhook secret is not set', 503, 'not_configured');
+    if (!safeEqual(String(req.query.k ?? ''), ctx.config.fleetbaseWebhookSecret)) throw new AppError('Bad secret', 401, 'unauthorised');
+    const id = req.body?.data?.id ?? req.body?.id;
+    res.json({ ok: true, change: id ? await ctx.fbsync.onWebhook(id) : null });
+  });
+
   app.use(json);
 
   /* -------------------------------------------------------------- public */
@@ -64,7 +73,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const r = await ingest.fromOwnSite(req.body);
     res.status(r.duplicate ? 200 : 201).json({ ok: true, number: r.order.number, duplicate: r.duplicate, tracking_url: notify.trackUrl(r.order) });
   });
-  pub.get('/public/quote', async (req, res) => res.json(await tracking.quote({ postcode: req.query.postcode })));
+  pub.get('/public/quote', async (req, res) => res.json(await tracking.quote({ postcode: req.query.postcode, site: req.query.site || 'main' })));
   pub.get('/public/status', (req, res) => { const s = settings.all(); res.json({ open: s.open, eta_minutes: s.default_eta_minutes, radius_km: s.radius_km, min_order_pence: s.min_order_pence }); });
   pub.get('/track/:token', async (req, res) => res.json(await tracking.view(req.params.token)));
   pub.post('/track/:token/rate', (req, res) => res.json(tracking.rate(req.params.token, req.body?.rating)));
@@ -80,6 +89,10 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
   /* --------------------------------------------------------------- admin */
   admin.use(auth.requireAdmin);
 
+  admin.get('/sites', (req, res) => res.json({ sites: ctx.sites.list() }));
+  admin.post('/sites', async (req, res) => res.status(201).json({ site: await ctx.sites.create(req.body || {}) }));
+  admin.put('/sites/:id', (req, res) => res.json({ site: ctx.sites.update(req.params.id, req.body || {}) }));
+  admin.post('/sites/:id/fleet', async (req, res) => res.json({ site: await ctx.sites.ensureFleet(req.params.id) }));
   admin.get('/settings', (req, res) => res.json(settings.all()));
   admin.put('/settings', (req, res) => {
     const s = settings.set(req.body || {});
@@ -126,7 +139,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
 
   admin.get('/drivers', async (req, res) => res.json({ ...(await shifts.availability({ requireOnline: false })), fleetbase: await ctx.fleetbase.drivers().then((d) => d.map((x) => ({ id: x.id, name: x.name, phone: x.phone, online: x.online }))).catch(() => null) }));
   admin.get('/drivers/availability', async (req, res) => res.json(await shifts.availability()));
-  admin.post('/drivers/:id/clock-in', async (req, res) => res.json({ shift: await shifts.clockIn(req.params.id, { zone: req.body?.zone, actor: 'admin' }) }));
+  admin.post('/drivers/:id/clock-in', async (req, res) => res.json({ shift: await shifts.clockIn(req.params.id, { zone: req.body?.zone, siteId: req.body?.site_id, actor: 'admin' }) }));
   admin.post('/drivers/:id/clock-out', async (req, res) => res.json({ shift: await shifts.clockOut(req.params.id, { actor: 'admin' }) }));
   admin.post('/drivers/:id/token', (req, res) => res.json({ token: shifts.issueToken(req.params.id), note: 'Shown once. Put it in the TAD Drivers app settings.' }));
 
@@ -171,7 +184,7 @@ export function createApp(ctx, { webDir = path.resolve('web/dist'), uploadDir = 
     const open = shifts.open(req.driverId);
     res.json({ driver_id: req.driverId, clocked_in: Boolean(open), since: open?.clock_in_at ?? null, zone: open?.zone ?? null });
   });
-  driver.post('/clock-in', async (req, res) => res.json({ shift: await shifts.clockIn(req.driverId, { zone: req.body?.zone }) }));
+  driver.post('/clock-in', async (req, res) => res.json({ shift: await shifts.clockIn(req.driverId, { zone: req.body?.zone, siteId: req.body?.site_id }) }));
   driver.post('/clock-out', async (req, res) => res.json({ shift: await shifts.clockOut(req.driverId) }));
   driver.get('/run', (req, res) => res.json(driverRun(req.driverId)));
   driver.post('/scan', (req, res) => {

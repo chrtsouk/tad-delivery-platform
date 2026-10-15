@@ -49,8 +49,8 @@ export function createOrders(ctx) {
   }
 
   /** Is this drop inside the area the owner set (radius + excluded districts)? Mirrors the Fleetbase service area. */
-  function checkDeliverable({ lat, lng, outcode }) {
-    const s = settings.all();
+  function checkDeliverable({ lat, lng, outcode, siteId = 'main' }) {
+    const s = { ...settings.all(), store: ctx.sites.store(siteId) };
     if (outcode && s.excluded_outcodes.includes(outcode)) throw new AppError(`Sorry, we do not deliver to ${outcode}`, 422, 'outside_area');
     if (lat != null && lng != null) {
       const km = haversineKm(s.store, { lat, lng });
@@ -69,6 +69,8 @@ export function createOrders(ctx) {
   /** Normalise any channel's order into one schema and store it. Idempotent on (source, external_id). */
   async function create(input, { actor = 'system' } = {}) {
     const source = text(input.source, 40, 'source', { required: true });
+    const siteId = input.site_id || 'main';
+    ctx.sites.need(siteId);
     const externalId = input.external_id ? String(input.external_id) : null;
     if (externalId) {
       const dup = q.get(db, 'SELECT id FROM orders WHERE source = ? AND external_id = ?', source, externalId);
@@ -88,7 +90,7 @@ export function createOrders(ctx) {
         if (!hit) throw new AppError(`We could not find ${pc.postcode} on the map`, 422, 'unknown_postcode');
         lat = hit.lat; lng = hit.lng;
       }
-      km = checkDeliverable({ lat, lng, outcode: pc.outcode });
+      km = checkDeliverable({ lat, lng, outcode: pc.outcode, siteId });
       if (!text(a.line1, 160, 'address', { required: true })) throw new AppError('Address is needed');
     }
     const fee = input.delivery_fee_pence ?? (fulfilment === 'delivery' && km != null ? deliveryFee(km) : null);
@@ -98,7 +100,7 @@ export function createOrders(ctx) {
     const r = q.run(db, `INSERT INTO orders(number, site_id, source, external_id, fulfilment, state, customer_name, customer_phone, customer_email,
         address_line, postcode, outcode, lat, lng, items_json, item_count, notes, total_pence, delivery_fee_pence, paid, scheduled_for, created_at, track_token, hub_order_id)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      number, input.site_id || 'main', source, externalId, fulfilment, state, text(customer.name, 80, 'customer name'), phone, customer.email ? String(customer.email).toLowerCase().slice(0, 120) : null,
+      number, siteId, source, externalId, fulfilment, state, text(customer.name, 80, 'customer name'), phone, customer.email ? String(customer.email).toLowerCase().slice(0, 120) : null,
       fulfilment === 'delivery' ? text(a.line1, 160, 'address') : null, pc?.postcode ?? null, pc?.outcode ?? null, lat, lng,
       JSON.stringify(items), items.reduce((n, i) => n + i.qty, 0), text(input.notes, 500, 'notes'), input.total_pence ?? null, fee, input.paid === false ? 0 : 1, scheduled, iso(), sign(ctx.trackSecret, number), input.hub_order_id ?? null);
     const id = Number(r.lastInsertRowid);
@@ -136,8 +138,8 @@ export function createOrders(ctx) {
   /** Create the matching Fleetbase order (unmodified Fleetbase, via its API). Safe to call again: it only runs once. */
   async function syncToFleetbase(order) {
     if (order.fulfilment !== 'delivery' || order.fleetbase_order_id || ['scheduled', 'cancelled', 'removed'].includes(order.state)) return order;
-    const s = settings.all();
-    const pickup = await fleetbase.createPlace({ name: s.store.name, street1: s.store.address || s.store.name, postal_code: s.store.postcode, country: 'GB', latitude: s.store.lat, longitude: s.store.lng });
+    const st = ctx.sites.store(order.site_id);
+    const pickup = await fleetbase.createPlace({ name: st.name, street1: st.address || st.name, postal_code: st.postcode, country: 'GB', latitude: st.lat, longitude: st.lng });
     const drop = await fleetbase.createPlace({ name: order.customer_name || order.address_line, street1: order.address_line, postal_code: order.postcode, country: 'GB', latitude: order.lat, longitude: order.lng, phone: order.customer_phone });
     const fb = await fleetbase.createOrder({
       pickup: pickup.id, dropoff: drop.id,

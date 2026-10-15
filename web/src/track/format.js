@@ -14,6 +14,7 @@ export const STATE_HEADLINE = {
 };
 
 export function headline(o) {
+  if (o.fulfilment === 'collection' && o.state === 'ready') return 'Ready to collect';
   if (o.closed) return 'Order cancelled';
   if (o.failed) return "We couldn't deliver";
   return STATE_HEADLINE[o.state] || o.steps?.find((s) => s.current)?.label || 'Order update';
@@ -21,7 +22,7 @@ export function headline(o) {
 
 export function queueText(o) {
   const n = o.queue_position;
-  if (n == null || o.closed || o.failed) return null;
+  if (n == null || o.closed || o.failed || o.fulfilment === 'collection') return null;
   if (o.state === 'out') return n <= 1 ? "You're the next stop" : `${n - 1} ${n - 1 === 1 ? 'stop' : 'stops'} before yours`;
   return n <= 1 ? "You're next in the queue" : `You're #${n} in the queue`;
 }
@@ -63,3 +64,17 @@ export function urlBase64ToUint8Array(b64) {
 }
 
 export function stars(n) { return '★'.repeat(n) + '☆'.repeat(5 - n); }
+
+/** wa.me wants an international number without + or leading zeros. UK-first: 07700 900123 -> 447700900123. */
+export function waDigits(p) {
+  let d = digits(p);
+  if (d.startsWith('00')) d = d.slice(2);
+  else if (d.startsWith('0')) d = `44${d.slice(1)}`;
+  return d;
+}
+
+/** Collection orders have no driver leg: drop it and word the rest for pick-up. */
+export function viewSteps(o) {
+  if (o.fulfilment !== 'collection') return o.steps;
+  return o.steps.filter((s) => s.key !== 'out').map((s) => (s.key === 'ready' ? { ...s, label: 'Ready to collect' } : s.key === 'delivered' ? { ...s, label: 'Collected' } : s));
+}

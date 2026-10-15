@@ -41,11 +41,11 @@ export function createBatcher(ctx) {
   }
 
   /** Sequence one cluster into runs of at most max_tasks. Uses VROOM; falls back to nearest-neighbour if it is unreachable. */
-  async function sequence(group, s) {
+  async function sequence(group, s, store) {
     const k = Math.ceil(group.length / s.max_tasks);
     const svc = s.service_minutes_per_drop * 60;
     try {
-      const vehicles = Array.from({ length: k }, (_, i) => ({ id: i + 1, start: s.store, capacity: s.max_tasks, max_tasks: s.max_tasks }));
+      const vehicles = Array.from({ length: k }, (_, i) => ({ id: i + 1, start: store, capacity: s.max_tasks, max_tasks: s.max_tasks }));
       const sol = await vroom.solve({ vehicles, jobs: group.map((o) => ({ id: o.id, loc: o, service: svc })) });
       const map = new Map(group.map((o) => [o.id, o]));
       const runs = sol.routes.map((r) => ({
@@ -59,9 +59,9 @@ export function createBatcher(ctx) {
       const runs = [];
       let rest = [...group];
       while (rest.length) {
-        const seed = rest.sort((a, b) => haversineKm(s.store, a) - haversineKm(s.store, b))[0];
+        const seed = rest.sort((a, b) => haversineKm(store, a) - haversineKm(store, b))[0];
         const near = rest.filter((o) => o !== seed).sort((a, b) => haversineKm(seed, a) - haversineKm(seed, b)).slice(0, s.max_tasks - 1);
-        const chosen = nnSequence(s.store, [seed, ...near]);
+        const chosen = nnSequence(store, [seed, ...near]);
         runs.push({ orders: chosen, legs: chosen.map((o, i) => (i === 0 ? null : estimateSeconds(chosen[i - 1], o))) });
         rest = rest.filter((o) => !chosen.includes(o));
       }
@@ -90,14 +90,15 @@ export function createBatcher(ctx) {
     if (only) ready = ready.filter((o) => only.includes(o.id));
     const proposals = [];
     let engine = 'none';
-    for (const group of cluster(ready, s)) {
-      const seq = await sequence(group, s);
+    const sites = [...new Set(ready.map((o) => o.site_id))];
+    for (const site of sites) for (const group of cluster(ready.filter((o) => o.site_id === site), s)) {
+      const seq = await sequence(group, s, ctx.sites.store(site));
       engine = seq.engine;
       for (const run of seq.runs) for (const piece of splitByGap(run, s)) {
         const oldestAge = now().getTime() - Math.min(...piece.map((o) => Date.parse(o.ready_at || o.created_at)));
         const full = piece.length >= s.max_tasks;
         const ripe = sendNow || full || oldestAge >= minutes(s.batch_hold_minutes);
-        proposals.push({ orders: piece, ripe, full, waits_seconds: ripe ? 0 : Math.ceil((minutes(s.batch_hold_minutes) - oldestAge) / 1000), oldest_at: Math.min(...piece.map((o) => Date.parse(o.ready_at || o.created_at))) });
+        proposals.push({ site, orders: piece, ripe, full, waits_seconds: ripe ? 0 : Math.ceil((minutes(s.batch_hold_minutes) - oldestAge) / 1000), oldest_at: Math.min(...piece.map((o) => Date.parse(o.ready_at || o.created_at))) });
       }
     }
     proposals.sort((a, b) => a.oldest_at - b.oldest_at);
@@ -106,14 +107,14 @@ export function createBatcher(ctx) {
 
   /* -------------------------------------------------------------- drivers */
 
-  function chooseDriver(strategy, candidates, s) {
+  function chooseDriver(strategy, candidates, s, store) {
     if (!candidates.length) return null;
     const lastAssigned = (d) => q.get(db, 'SELECT MAX(assigned_at) AS t FROM batches WHERE driver_id = ?', d.driver_id)?.t ?? '';
     const today = iso().slice(0, 10);
     const load = (d) => q.get(db, "SELECT COUNT(*) AS n FROM orders WHERE driver_id = ? AND substr(COALESCE(assigned_at, created_at),1,10) = ?", d.driver_id, today).n;
     const idle = (d) => lastAssigned(d);
     const key = {
-      nearest: (d) => [d.lat != null ? haversineKm(s.store, d) : 0, idle(d)],
+      nearest: (d) => [d.lat != null ? haversineKm(store, d) : 0, idle(d)],
       round_robin: (d) => [idle(d), 0],
       fewest_jobs: (d) => [load(d), idle(d)],
     }[strategy] ?? ((d) => [0, idle(d)]);
@@ -134,10 +135,10 @@ export function createBatcher(ctx) {
     }
   }
 
-  function createBatch(driverId, orderList, { preassigned = false, note = null, status } = {}) {
+  function createBatch(driverId, orderList, { preassigned = false, note = null, status, site = 'main' } = {}) {
     return tx(db, () => {
       const r = q.run(db, 'INSERT INTO batches(site_id, driver_id, status, preassigned, created_at, assigned_at, note) VALUES(?,?,?,?,?,?,?)',
-        'main', driverId, status ?? (preassigned ? 'planned' : 'assigned'), preassigned ? 1 : 0, iso(), preassigned ? null : iso(), note);
+        site, driverId, status ?? (preassigned ? 'planned' : 'assigned'), preassigned ? 1 : 0, iso(), preassigned ? null : iso(), note);
       const id = Number(r.lastInsertRowid);
       orderList.forEach((o, i) => attach(o.id, id, driverId, i + 1, preassigned));
       return id;
@@ -182,10 +183,10 @@ export function createBatcher(ctx) {
       const ripe = proposals.filter((p) => p.ripe);
       out.waiting = proposals.filter((p) => !p.ripe).map(summarise);
       for (const p of ripe) {
-        const d = chooseDriver(s.strategy, free, s);
+        const d = chooseDriver(s.strategy, free.filter((x) => x.site_id === p.site), s, ctx.sites.store(p.site));
         if (d) {
           free = free.filter((x) => x.driver_id !== d.driver_id);
-          const id = createBatch(d.driver_id, p.orders, { note: engine === 'local' ? 'sequenced locally (VROOM unavailable)' : null });
+          const id = createBatch(d.driver_id, p.orders, { site: p.site, note: engine === 'local' ? 'sequenced locally (VROOM unavailable)' : null });
           await dispatchBatchToFleetbase(id);
           notify.driver(d.driver_id, { kind: 'run_ready', title: `${p.orders.length} order${p.orders.length > 1 ? 's' : ''} ready to collect`, body: 'Scan each bag, then go.', batchId: id });
           audit.log('batcher', 'batch.assigned', 'batch', id, { driver: d.driver_id, orders: p.orders.map((o) => o.number), strategy: s.strategy });
@@ -193,7 +194,7 @@ export function createBatcher(ctx) {
           out.assigned.push({ batch: id, driver: d.driver_id, orders: p.orders.map((o) => o.number) });
           continue;
         }
-        const pre = preassign(p, av.busy, s);
+        const pre = preassign(p, av.busy.filter((b) => b.site_id === p.site), s);
         if (pre) out.preassigned.push(pre); else out.queued += p.orders.length;
       }
       out.returnPushes = await pushReturns();
@@ -221,7 +222,7 @@ export function createBatcher(ctx) {
     const withoutNext = cand.filter((b) => !q.get(db, "SELECT 1 AS x FROM batches WHERE driver_id = ? AND status = 'planned'", b.driver_id));
     const pick = (withoutNext.length ? withoutNext : []).sort((a, b) => (a.return_eta_at || 'z') < (b.return_eta_at || 'z') ? -1 : 1)[0];
     if (!pick) return null;
-    const id = createBatch(pick.driver_id, piece.orders, { preassigned: true, note: 'pre-assigned while the driver is out' });
+    const id = createBatch(pick.driver_id, piece.orders, { site: piece.site, preassigned: true, note: 'pre-assigned while the driver is out' });
     audit.log('batcher', 'batch.preassigned', 'batch', id, { driver: pick.driver_id, orders: piece.orders.map((o) => o.number) });
     bus.emit('batch', { batchId: id, status: 'planned' });
     return { batch: id, driver: pick.driver_id, orders: piece.orders.map((o) => o.number) };
@@ -273,10 +274,10 @@ export function createBatcher(ctx) {
     return o.batch_id;
   }
 
-  async function deliver(orderId, { actor = 'driver' } = {}) {
+  async function deliver(orderId, { actor = 'driver', skipFleetbase = false } = {}) {
     const o = orders.need(orderId);
     const done = orders.transition(orderId, o.fulfilment === 'collection' ? 'collected' : 'delivered', { actor });
-    if (o.fleetbase_order_id) { try { await fleetbase.complete(o.fleetbase_order_id); } catch (e) { logger.warn?.(`Fleetbase complete ${o.number}: ${e.message}`); } }
+    if (o.fleetbase_order_id && !skipFleetbase) { try { await fleetbase.complete(o.fleetbase_order_id); } catch (e) { logger.warn?.(`Fleetbase complete ${o.number}: ${e.message}`); } }
     await afterDrop(orderId);
     return done;
   }
@@ -290,8 +291,10 @@ export function createBatcher(ctx) {
   /** Seconds until the driver is back at the shop: remaining drops in sequence, then home. Written to batches.return_eta_at. */
   async function updateReturnEta(batchId, { from = null } = {}) {
     const s = settings.all();
+    const bsite = q.get(db, 'SELECT site_id FROM batches WHERE id = ?', batchId)?.site_id ?? 'main';
+    const home = ctx.sites.store(bsite);
     const remaining = q.all(db, "SELECT * FROM orders WHERE batch_id = ? AND state = 'out' ORDER BY stop_seq", batchId);
-    const pts = [from && from.lat != null ? from : s.store, ...remaining, s.store];
+    const pts = [from && from.lat != null ? from : home, ...remaining, home];
     let secs = 0;
     try { const t = await osrm.table(pts); for (let i = 0; i < pts.length - 1; i++) secs += t[i][i + 1]; }
     catch { for (let i = 0; i < pts.length - 1; i++) secs += estimateSeconds(pts[i], pts[i + 1]); }
@@ -338,7 +341,7 @@ export function createBatcher(ctx) {
         batchId = target.id;
         attach(orderId, batchId, toDriverId, n + 1, target.status === 'planned');
       } else {
-        batchId = createBatch(toDriverId, [o], { preassigned: Boolean(onRun), note: 'set by hand' });
+        batchId = createBatch(toDriverId, [o], { site: o.site_id, preassigned: Boolean(onRun), note: 'set by hand' });
       }
       await resequence(batchId);
       const b = q.get(db, 'SELECT * FROM batches WHERE id = ?', batchId);
@@ -353,13 +356,14 @@ export function createBatcher(ctx) {
   /** Re-run the sequence for one run after a hand change. */
   async function resequence(batchId) {
     const s = settings.all();
+    const home = ctx.sites.store(q.get(db, 'SELECT site_id FROM batches WHERE id = ?', batchId)?.site_id ?? 'main');
     const rows = q.all(db, "SELECT * FROM orders WHERE batch_id = ? AND state = 'assigned'", batchId).map((r) => orders.byId(r.id));
     if (rows.length < 2) { rows.forEach((o, i) => q.run(db, 'UPDATE orders SET stop_seq = ? WHERE id = ?', i + 1, o.id)); return; }
     let ordered;
     try {
-      const sol = await vroom.solve({ vehicles: [{ id: 1, start: s.store, capacity: rows.length, max_tasks: rows.length }], jobs: rows.map((o) => ({ id: o.id, loc: o, service: s.service_minutes_per_drop * 60 })) });
+      const sol = await vroom.solve({ vehicles: [{ id: 1, start: home, capacity: rows.length, max_tasks: rows.length }], jobs: rows.map((o) => ({ id: o.id, loc: o, service: s.service_minutes_per_drop * 60 })) });
       ordered = sol.routes[0].stops.map((st) => st.job);
-    } catch { ordered = nnSequence(s.store, rows).map((o) => o.id); }
+    } catch { ordered = nnSequence(home, rows).map((o) => o.id); }
     ordered.forEach((id, i) => q.run(db, 'UPDATE orders SET stop_seq = ? WHERE id = ?', i + 1, id));
   }
 

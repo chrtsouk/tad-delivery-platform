@@ -186,6 +186,11 @@ export function createIngest(ctx) {
         const hit = await postcodes.lookup(pc.postcode).catch(() => null);
         if (hit) out.push({ from: 'postcode', label: pc.postcode, line1: '', postcode: pc.postcode, lat: hit.lat, lng: hit.lng });
       }
+      if (ctx.osPlaces?.enabled()) {
+        try {
+          for (const r of await ctx.osPlaces.search(text)) { const pcn = tryPostcode(r.postcode); if (pcn) out.push({ from: 'os_places', label: r.label, line1: r.line1, postcode: pcn.postcode, lat: r.lat, lng: r.lng }); }
+        } catch (e) { logger.warn?.(`address search (OS Places) unavailable: ${e.message}`); }
+      }
       try {
         for (const r of await photon.search(text, { near })) {
           if (r.postcode && !tryPostcode(r.postcode)) continue;

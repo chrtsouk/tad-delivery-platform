@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { makeCtx, newOrder, makeReady, clockIn, startApp } from './helpers.js';
-import { createFleetbase, createOsrm, createVroom, createPostcodes, createPhoton, createHub } from '../lib/clients.js';
+import { createOsPlaces, createFleetbase, createOsrm, createVroom, createPostcodes, createPhoton, createHub } from '../lib/clients.js';
 import { normalisePostcode, normalisePhone, haversineKm } from '../lib/geo.js';
 import { sign, verify } from '../lib/tokens.js';
 
@@ -195,4 +195,62 @@ test('login is rate limited after repeated wrong passwords', async () => {
     assert.equal(last.status, 429);
     assert.equal((await app.call('POST', '/api/login', { body: { password: 'pw-test' } })).status, 429, 'even the right one waits');
   } finally { await app.close(); }
+});
+
+test('Navigator/console changes in Fleetbase flow back: started sends the run out, completed delivers', async () => {
+  const ctx = makeCtx({ settings: { batch_hold_minutes: 0, max_tasks: 2 } });
+  await clockIn(ctx, 'driver_a');
+  const a = await makeReady(ctx, await newOrder(ctx, 'SW11 5XX')), b = await makeReady(ctx, await newOrder(ctx, 'SW11 6AA'));
+  await ctx.batcher.tick();
+  const fa = ctx.orders.byId(a.id).fleetbase_order_id, fbo = ctx.orders.byId(b.id).fleetbase_order_id;
+  assert.deepEqual(await ctx.fbsync.reconcile(), [], 'nothing changed yet');
+  ctx.fb.orders_.get(fa).status = 'started';
+  const ch = await ctx.fbsync.reconcile();
+  assert.ok(ch.length >= 1);
+  assert.equal(ctx.orders.byId(a.id).state, 'out');
+  assert.equal(ctx.orders.byId(b.id).state, 'out', 'the whole run left');
+  ctx.fb.orders_.get(fa).status = 'completed';
+  await ctx.fbsync.reconcile();
+  assert.equal(ctx.orders.byId(a.id).state, 'delivered');
+  assert.equal(ctx.orders.byId(b.id).state, 'out');
+  assert.equal(ctx.fb.calls.filter((c) => c[0] === 'complete' && c[1] === fa).length, 0, 'does not complete again in Fleetbase');
+  ctx.fb.orders_.get(fbo).status = 'completed';
+  await ctx.fbsync.reconcile();
+  assert.equal(ctx.db.prepare('SELECT status FROM batches').get().status, 'done');
+});
+
+test('multi-site: each shop batches from its own location with its own drivers', async () => {
+  const ctx = makeCtx({ settings: { batch_hold_minutes: 0, radius_km: 60 } });
+  const site = await ctx.sites.create({ name: 'North Shop', postcode: 'N1 5AA' });
+  assert.equal(site.id, 'north-shop');
+  await assert.rejects(() => ctx.sites.create({ name: 'North Shop', postcode: 'N1 5AA' }), /already exists/);
+  await clockIn(ctx, 'south_d');
+  ctx.fb.addDriver({ id: 'north_d', name: 'North D', lat: site.lat, lng: site.lng });
+  await ctx.shifts.clockIn('north_d', { siteId: 'north-shop' });
+  const s1 = await makeReady(ctx, await newOrder(ctx, 'SW11 5XX'));
+  const { order } = await ctx.orders.create({ source: 'own-site', external_id: 'n1', site_id: 'north-shop', customer: { name: 'N', phone: '07700900123' }, address: { line1: '1 Rd', postcode: 'N1 5AA' }, items: [{ name: 'W', qty: 1 }] });
+  const n1 = await makeReady(ctx, order);
+  const r = await ctx.batcher.tick();
+  assert.equal(r.assigned.length, 2);
+  assert.equal(ctx.orders.byId(s1.id).driver_id, 'south_d');
+  assert.equal(ctx.orders.byId(n1.id).driver_id, 'north_d');
+  assert.equal(ctx.db.prepare('SELECT site_id FROM batches WHERE driver_id = ?').get('north_d').site_id, 'north-shop');
+  // pickup place in Fleetbase is the north shop
+  const places = [...ctx.fb.places_.values()];
+  assert.ok(places.some((p) => p.postal_code === 'N1 5AA' && p.name === 'North Shop'));
+  await assert.rejects(() => ctx.orders.create({ source: 'x', site_id: 'nope', customer: {}, address: { line1: 'a', postcode: 'SW11 5XX' }, items: [{ name: 'a', qty: 1 }] }), /no active shop/);
+});
+
+test('OS Places adapter maps DPA records; address search uses it before Photon when a key is set', async () => {
+  const s = await fakeServer((req) => ({ json: { results: [{ DPA: { ADDRESS: '12, LAVENDER HILL, LONDON, SW11 5RW', BUILDING_NUMBER: '12', THOROUGHFARE_NAME: 'LAVENDER HILL', POST_TOWN: 'LONDON', POSTCODE: 'SW11 5RW', LAT: 51.46, LNG: -0.16 } }] } }));
+  try {
+    const os = createOsPlaces({ key: 'k', url: s.url });
+    assert.deepEqual((await os.search('12 lavender'))[0], { line1: '12 LAVENDER HILL', city: 'LONDON', postcode: 'SW11 5RW', label: '12, LAVENDER HILL, LONDON, SW11 5RW', lat: 51.46, lng: -0.16 });
+    assert.ok(s.seen[0].url.includes('key=k'));
+    const ctx = makeCtx();
+    ctx.osPlaces = os;
+    ctx.photon = { search: async () => [] };
+    const out = await (await import('../services/ingest.js')).createIngest(ctx).searchAddress({ query: '12 lavender' });
+    assert.equal(out[0].from, 'os_places');
+  } finally { await s.close(); }
 });

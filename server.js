@@ -18,6 +18,7 @@ const timer = setInterval(async () => {
   if (busy) return;
   busy = true;
   try {
+    await ctx.fbsync.reconcile();
     await ctx.batcher.tick();
     await ctx.hubsync.pushPending();
     await ctx.hubsync.pollEvents();

@@ -19,7 +19,7 @@ export function createLabels(ctx) {
   function layout(order) {
     const s = settings.all();
     return {
-      shop: s.store.name,
+      shop: ctx.sites.store(order.site_id).name,
       number: order.number,
       qr: qrPayload(order.number),
       kind: order.fulfilment === 'delivery' ? 'DELIVERY' : 'COLLECTION',
