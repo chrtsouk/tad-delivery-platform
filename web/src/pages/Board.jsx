@@ -2,7 +2,7 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import { Link } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { DragDropContext, Draggable, Droppable } from '@hello-pangea/dnd';
-import { post, put } from '../lib/api.js';
+import { get, post, put } from '../lib/api.js';
 import { useBoard } from '../lib/useBoard.js';
 import { playLate, playNewOrder, unlockAudio, useAudioLocked } from '../lib/sound.js';
 import AskDialog from '../components/AskDialog.jsx';
@@ -169,7 +169,7 @@ export default function Board() {
         return call(key, () => post(`/api/orders/${order.id}/print`), `Label for ${order.number} sent to the printer`);
       }
       case 'wa': return call(key, async () => {
-        const { link } = await (await import('../lib/api.js')).get(`/api/orders/${order.id}/wa-link`);
+        const { link } = await get(`/api/orders/${order.id}/wa-link`);
         if (!window.open(link, '_blank', 'noopener')) throw new Error('The browser blocked the WhatsApp window. Allow pop-ups for this site and try again.');
       });
       default: return undefined;
